@@ -1,9 +1,10 @@
 package id.ac.ui.cs.advprog.order.controller;
 
-package id.ac.ui.cs.advprog.order.controller;
-
-import id.ac.ui.cs.advprog.order.dto.*;
-import id.ac.ui.cs.advprog.order.entity.OrderStatus;
+import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
+import id.ac.ui.cs.advprog.order.dto.OrderDetailResponse;
+import id.ac.ui.cs.advprog.order.dto.OrderListItemResponse;
+import id.ac.ui.cs.advprog.order.dto.RatingRequest;
+import id.ac.ui.cs.advprog.order.dto.StatusUpdateRequest;
 import id.ac.ui.cs.advprog.order.service.OrderService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,14 +21,20 @@ public class OrderController {
         this.service = service;
     }
 
-    private Long userId(String header) {
-        if (header == null || header.isBlank()) throw new IllegalArgumentException("X_USER_ID_REQUIRED");
-        return Long.parseLong(header);
+    private Long parseUserId(String userIdHeader) {
+        if (userIdHeader == null || userIdHeader.isBlank()) {
+            throw new IllegalArgumentException("X_USER_ID_REQUIRED");
+        }
+        try {
+            return Long.parseLong(userIdHeader.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("X_USER_ID_INVALID");
+        }
     }
 
-    private String role(String header) {
-        if (header == null || header.isBlank()) return "BUYER";
-        return header.trim().toUpperCase();
+    private String parseRole(String roleHeader) {
+        if (roleHeader == null || roleHeader.isBlank()) return "BUYER";
+        return roleHeader.trim().toUpperCase();
     }
 
     @PostMapping("/checkout")
@@ -36,7 +43,7 @@ public class OrderController {
             @RequestHeader(value = "X-Idempotency-Key", required = false) String idemKey,
             @RequestBody CheckoutRequest req
     ) {
-        var res = service.checkout(userId(userId), idemKey, req);
+        var res = service.checkout(parseUserId(userId), idemKey, req);
         return ResponseEntity.ok(res);
     }
 
@@ -44,14 +51,19 @@ public class OrderController {
     public ResponseEntity<List<OrderListItemResponse>> myOrders(
             @RequestHeader("X-User-Id") String userId
     ) {
-        return ResponseEntity.ok(service.listMyOrders(userId(userId)));
+        return ResponseEntity.ok(service.listMyOrders(parseUserId(userId)));
     }
 
     @GetMapping("/jastiper")
     public ResponseEntity<List<OrderListItemResponse>> jastiperOrders(
-            @RequestHeader("X-User-Id") String userId
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader(value = "X-Role", required = false) String role
     ) {
-        return ResponseEntity.ok(service.listJastiperOrders(userId(userId)));
+        String r = parseRole(role);
+        if (!r.equals("JASTIPER") && !r.equals("ADMIN")) {
+            throw new IllegalStateException("FORBIDDEN");
+        }
+        return ResponseEntity.ok(service.listJastiperOrders(parseUserId(userId)));
     }
 
     @GetMapping("/{id}")
@@ -60,7 +72,7 @@ public class OrderController {
             @RequestHeader("X-User-Id") String userId,
             @RequestHeader(value = "X-Role", required = false) String role
     ) {
-        return ResponseEntity.ok(service.getDetail(orderId, userId(userId), role(role)));
+        return ResponseEntity.ok(service.getDetail(orderId, parseUserId(userId), parseRole(role)));
     }
 
     @PostMapping("/{id}/status")
@@ -70,8 +82,9 @@ public class OrderController {
             @RequestHeader(value = "X-Role", required = false) String role,
             @RequestBody StatusUpdateRequest req
     ) {
-        OrderStatus next = req.getNextStatus();
-        return ResponseEntity.ok(service.updateStatus(orderId, userId(userId), role(role), next));
+        return ResponseEntity.ok(
+                service.updateStatus(orderId, parseUserId(userId), parseRole(role), req.getNextStatus())
+        );
     }
 
     @PostMapping("/{id}/cancel")
@@ -80,7 +93,7 @@ public class OrderController {
             @RequestHeader("X-User-Id") String userId,
             @RequestHeader(value = "X-Role", required = false) String role
     ) {
-        return ResponseEntity.ok(service.cancel(orderId, userId(userId), role(role)));
+        return ResponseEntity.ok(service.cancel(orderId, parseUserId(userId), parseRole(role)));
     }
 
     @PostMapping("/{id}/rating")
@@ -90,8 +103,8 @@ public class OrderController {
             @RequestHeader(value = "X-Role", required = false) String role,
             @RequestBody RatingRequest req
     ) {
-        if (!"BUYER".equals(role(role))) throw new IllegalStateException("FORBIDDEN");
-        service.rate(orderId, userId(userId), req);
+        if (!parseRole(role).equals("BUYER")) throw new IllegalStateException("FORBIDDEN");
+        service.rate(orderId, parseUserId(userId), req);
         return ResponseEntity.ok().build();
     }
 }
