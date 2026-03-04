@@ -9,22 +9,12 @@ function formatRp(n) {
     return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR" }).format(num);
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 export default function App() {
     // ===== Health =====
     const [health, setHealth] = useState("loading...");
     const [lastChecked, setLastChecked] = useState(null);
-
-    async function refreshHealth() {
-        try {
-            const r = await fetch("/actuator/health");
-            const d = await r.json();
-            setHealth(d?.status || "DOWN");
-            setLastChecked(new Date());
-        } catch {
-            setHealth("DOWN");
-            setLastChecked(new Date());
-        }
-    }
 
     const healthTone = useMemo(() => {
         if (health === "UP") return "border-emerald-400/20 bg-emerald-400/10 text-emerald-200";
@@ -32,8 +22,20 @@ export default function App() {
         return "border-red-400/20 bg-red-400/10 text-red-200";
     }, [health]);
 
+    async function refreshHealthClick() {
+        try {
+            const r = await fetch(`${API_BASE}/actuator/health`);
+            const d = await r.json().catch(() => ({}));
+            setHealth(d?.status || (r.ok ? "UP" : "DOWN"));
+            setLastChecked(new Date());
+        } catch {
+            setHealth("DOWN");
+            setLastChecked(new Date());
+        }
+    }
+
     // ===== Orders (dummy) =====
-    const [orders, setOrders] = useState([
+    const [orders] = useState([
         {
             id: "ORD-001",
             status: "PAID",
@@ -65,11 +67,33 @@ export default function App() {
 
     async function submitCheckout(e) {
         e.preventDefault();
+
+        // masih dummy sesuai tulisanmu, tapi formatnya sudah siap untuk integrasi
         setCheckoutMsg("✅ (Dummy) Checkout sukses. Tinggal sambungkan ke POST /orders/checkout");
     }
 
+    // ✅ FIX: jangan panggil refreshHealth() dari useEffect.
+    // Taruh logika fetch langsung di effect (async IIFE).
     useEffect(() => {
-        refreshHealth();
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const r = await fetch(`${API_BASE}/actuator/health`);
+                const d = await r.json().catch(() => ({}));
+                if (cancelled) return;
+                setHealth(d?.status || (r.ok ? "UP" : "DOWN"));
+                setLastChecked(new Date());
+            } catch {
+                if (cancelled) return;
+                setHealth("DOWN");
+                setLastChecked(new Date());
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     return (
@@ -95,7 +119,7 @@ export default function App() {
               HEALTH: {health}
             </span>
                         <button
-                            onClick={refreshHealth}
+                            onClick={refreshHealthClick}
                             className="rounded-xl border border-white/10 bg-white/10 px-5 py-2 text-sm font-semibold transition hover:bg-white/20 active:scale-95"
                         >
                             Refresh
@@ -206,7 +230,8 @@ export default function App() {
                         </div>
 
                         <div className="mt-4 text-xs text-white/50">
-                            Ini masih dummy. Nanti tinggal sambungkan: <b>GET /orders/my</b> atau <b>GET /orders/jastiper</b> dan <b>POST /orders/checkout</b>.
+                            Ini masih dummy. Nanti tinggal sambungkan: <b>GET /orders/my</b> atau <b>GET /orders/jastiper</b> dan{" "}
+                            <b>POST /orders/checkout</b>.
                         </div>
                     </div>
                 </div>
