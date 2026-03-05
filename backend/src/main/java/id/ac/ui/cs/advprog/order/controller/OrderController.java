@@ -1,11 +1,11 @@
 package id.ac.ui.cs.advprog.order.controller;
 
-import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
-import id.ac.ui.cs.advprog.order.dto.OrderDetailResponse;
-import id.ac.ui.cs.advprog.order.dto.OrderListItemResponse;
-import id.ac.ui.cs.advprog.order.dto.RatingRequest;
-import id.ac.ui.cs.advprog.order.dto.StatusUpdateRequest;
+import id.ac.ui.cs.advprog.order.common.ApiResponse;
+import id.ac.ui.cs.advprog.order.common.Role;
+import id.ac.ui.cs.advprog.order.dto.*;
 import id.ac.ui.cs.advprog.order.service.OrderService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,90 +21,129 @@ public class OrderController {
         this.service = service;
     }
 
-    private Long parseUserId(String userIdHeader) {
-        if (userIdHeader == null || userIdHeader.isBlank()) {
-            throw new IllegalArgumentException("X_USER_ID_REQUIRED");
-        }
-        try {
-            return Long.parseLong(userIdHeader.trim());
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("X_USER_ID_INVALID");
-        }
+    private void requireRole(Role actual, Role... allowed) {
+        for (Role a : allowed) if (actual == a) return;
+        throw new IllegalStateException("FORBIDDEN");
     }
 
-    private String parseRole(String roleHeader) {
-        if (roleHeader == null || roleHeader.isBlank()) return "BUYER";
-        return roleHeader.trim().toUpperCase();
+    private String toServiceRole(Role role) {
+        // kompatibel dengan OrderService kamu yang masih pakai string:
+        // "BUYER", "JASTIPER", "ADMIN"
+        if (role == null) return "BUYER";
+        return switch (role) {
+            case TITIPER -> "BUYER";
+            case JASTIPER -> "JASTIPER";
+            case ADMIN -> "ADMIN";
+        };
     }
 
+    /**
+     * Milestone 25%:
+     * Checkout = create order draft/pending (belum debit wallet, diskon 0).
+     * Field voucherCode harus ada (boleh belum mengubah total / diskon 0).
+     */
     @PostMapping("/checkout")
-    public ResponseEntity<OrderDetailResponse> checkout(
-            @RequestHeader("X-User-Id") String userId,
+    public ResponseEntity<ApiResponse<OrderDetailResponse>> checkout(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-Role", required = false) String roleHeader,
             @RequestHeader(value = "X-Idempotency-Key", required = false) String idemKey,
-            @RequestBody CheckoutRequest req
+            @Valid @RequestBody CheckoutRequest req
     ) {
-        var res = service.checkout(parseUserId(userId), idemKey, req);
-        return ResponseEntity.ok(res);
+        Role role = Role.fromHeader(roleHeader);
+        requireRole(role, Role.TITIPER); // hanya TITIPER yang checkout
+
+        // OrderService kamu sekarang masih signature lama: checkout(Long, String, CheckoutRequest)
+        var res = service.checkout(userId, idemKey, req);
+
+        // 201 karena ini create order
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(res));
     }
 
     @GetMapping("/my")
-    public ResponseEntity<List<OrderListItemResponse>> myOrders(
-            @RequestHeader("X-User-Id") String userId
+    public ResponseEntity<ApiResponse<List<OrderListItemResponse>>> myOrders(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-Role", required = false) String roleHeader
     ) {
-        return ResponseEntity.ok(service.listMyOrders(parseUserId(userId)));
+        Role role = Role.fromHeader(roleHeader);
+        requireRole(role, Role.TITIPER, Role.ADMIN);
+
+        return ResponseEntity.ok(ApiResponse.ok(service.listMyOrders(userId)));
     }
 
     @GetMapping("/jastiper")
-    public ResponseEntity<List<OrderListItemResponse>> jastiperOrders(
-            @RequestHeader("X-User-Id") String userId,
-            @RequestHeader(value = "X-Role", required = false) String role
+    public ResponseEntity<ApiResponse<List<OrderListItemResponse>>> jastiperOrders(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-Role", required = false) String roleHeader
     ) {
-        String r = parseRole(role);
-        if (!r.equals("JASTIPER") && !r.equals("ADMIN")) {
-            throw new IllegalStateException("FORBIDDEN");
-        }
-        return ResponseEntity.ok(service.listJastiperOrders(parseUserId(userId)));
+        Role role = Role.fromHeader(roleHeader);
+        requireRole(role, Role.JASTIPER, Role.ADMIN);
+
+        return ResponseEntity.ok(ApiResponse.ok(service.listJastiperOrders(userId)));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<OrderDetailResponse> detail(
+    public ResponseEntity<ApiResponse<OrderDetailResponse>> detail(
             @PathVariable("id") Long orderId,
-            @RequestHeader("X-User-Id") String userId,
-            @RequestHeader(value = "X-Role", required = false) String role
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-Role", required = false) String roleHeader
     ) {
-        return ResponseEntity.ok(service.getDetail(orderId, parseUserId(userId), parseRole(role)));
+        Role role = Role.fromHeader(roleHeader);
+        String serviceRole = toServiceRole(role);
+
+        return ResponseEntity.ok(ApiResponse.ok(service.getDetail(orderId, userId, serviceRole)));
     }
 
     @PostMapping("/{id}/status")
-    public ResponseEntity<OrderDetailResponse> updateStatus(
+    public ResponseEntity<ApiResponse<OrderDetailResponse>> updateStatus(
             @PathVariable("id") Long orderId,
-            @RequestHeader("X-User-Id") String userId,
-            @RequestHeader(value = "X-Role", required = false) String role,
-            @RequestBody StatusUpdateRequest req
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-Role", required = false) String roleHeader,
+            @Valid @RequestBody StatusUpdateRequest req
     ) {
-        return ResponseEntity.ok(
-                service.updateStatus(orderId, parseUserId(userId), parseRole(role), req.getNextStatus())
-        );
+        Role role = Role.fromHeader(roleHeader);
+
+        // gate awal (validasi detail tetap di service)
+        if (role == Role.TITIPER) {
+            // titiper hanya boleh confirm COMPLETED
+            if (req.getNextStatus() == null || !"COMPLETED".equalsIgnoreCase(req.getNextStatus().name())) {
+                throw new IllegalStateException("FORBIDDEN");
+            }
+        } else {
+            requireRole(role, Role.JASTIPER, Role.ADMIN);
+        }
+
+        String serviceRole = toServiceRole(role);
+
+        return ResponseEntity.ok(ApiResponse.ok(
+                service.updateStatus(orderId, userId, serviceRole, req.getNextStatus())
+        ));
     }
 
     @PostMapping("/{id}/cancel")
-    public ResponseEntity<OrderDetailResponse> cancel(
+    public ResponseEntity<ApiResponse<OrderDetailResponse>> cancel(
             @PathVariable("id") Long orderId,
-            @RequestHeader("X-User-Id") String userId,
-            @RequestHeader(value = "X-Role", required = false) String role
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-Role", required = false) String roleHeader
     ) {
-        return ResponseEntity.ok(service.cancel(orderId, parseUserId(userId), parseRole(role)));
+        Role role = Role.fromHeader(roleHeader);
+        requireRole(role, Role.JASTIPER, Role.ADMIN); // sesuai spek: dibatalkan oleh Jastiper
+
+        String serviceRole = toServiceRole(role);
+
+        return ResponseEntity.ok(ApiResponse.ok(service.cancel(orderId, userId, serviceRole)));
     }
 
     @PostMapping("/{id}/rating")
-    public ResponseEntity<Void> rating(
+    public ResponseEntity<ApiResponse<Void>> rating(
             @PathVariable("id") Long orderId,
-            @RequestHeader("X-User-Id") String userId,
-            @RequestHeader(value = "X-Role", required = false) String role,
-            @RequestBody RatingRequest req
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-Role", required = false) String roleHeader,
+            @Valid @RequestBody RatingRequest req
     ) {
-        if (!parseRole(role).equals("BUYER")) throw new IllegalStateException("FORBIDDEN");
-        service.rate(orderId, parseUserId(userId), req);
-        return ResponseEntity.ok().build();
+        Role role = Role.fromHeader(roleHeader);
+        requireRole(role, Role.TITIPER);
+
+        service.rate(orderId, userId, req);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 }
