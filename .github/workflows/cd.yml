@@ -28,11 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - name: Trigger Render deploy hook
-        env:
-          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
-        run: |
-          if [ -z "$HOOK" ]; then
-            echo "Missing secret RENDER_DEPLOY_HOOK_BACKEND"; exit 1
-          fi
-          curl -fsSL -X POST "$HOOK"
+      - name: Trigger Render Deploy Hook
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
+        run: curl -fsSL "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
