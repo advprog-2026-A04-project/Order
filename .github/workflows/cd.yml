@@ -1,4 +1,38 @@
-name: cd.yml
+name: CD - Render Backend
+
 on:
+  push:
+    branches: ["main"]
+    paths:
+      - "backend/**"
+      - "Dockerfile"
+      - ".github/workflows/cd-render-backend.yml"
+  workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: chmod +x ./gradlew
+      - run: ./gradlew test --no-daemon
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Trigger Render deploy hook
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "Missing secret RENDER_DEPLOY_HOOK_BACKEND"; exit 1
+          fi
+          curl -fsSL -X POST "$HOOK"
