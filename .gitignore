@@ -39,3 +39,8 @@ out/
 backend/data/
 backend/*.mv.db
 backend/*.trace.db
+
+backend/data/
+*.mv.db
+*.trace.db
+
