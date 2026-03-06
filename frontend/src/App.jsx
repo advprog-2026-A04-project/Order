@@ -8,7 +8,10 @@ function cx(...c) {
 
 function formatRp(n) {
     const num = Number(n || 0);
-    return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR" }).format(num);
+    return new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+    }).format(num);
 }
 
 function toIsoLocal(isoString) {
@@ -19,68 +22,73 @@ function toIsoLocal(isoString) {
     }
 }
 
+function Field({ label, children }) {
+    return (
+        <div>
+            <label className="text-white/60">{label}</label>
+            <div className="mt-1">{children}</div>
+        </div>
+    );
+}
+
+async function fetchHealthData() {
+    try {
+        const response = await fetch(`${API}/actuator/health`);
+        const data = await response.json();
+
+        return {
+            health: data?.status || (response.ok ? "UP" : "DOWN"),
+            checkedAt: new Date(),
+        };
+    } catch {
+        return {
+            health: "DOWN",
+            checkedAt: new Date(),
+        };
+    }
+}
+
+async function fetchOrdersData(demoUserId, demoRole) {
+    try {
+        const response = await fetch(`${API}/orders/my`, {
+            headers: {
+                "X-User-Id": String(demoUserId),
+                "X-Role": demoRole,
+            },
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || data?.success === false) {
+            return {
+                orders: [],
+                error:
+                    data?.error?.message || `Failed to fetch orders (${response.status})`,
+            };
+        }
+
+        return {
+            orders: Array.isArray(data.data) ? data.data : [],
+            error: "",
+        };
+    } catch {
+        return {
+            orders: [],
+            error: "Failed to fetch orders (network/CORS).",
+        };
+    }
+}
+
 export default function App() {
-    // Demo identity for Milestone 25%
     const demoUserId = 1;
     const demoRole = "TITIPER";
 
-    // ===== Health =====
     const [health, setHealth] = useState("loading...");
     const [lastChecked, setLastChecked] = useState(null);
 
-    const healthTone = useMemo(() => {
-        if (health === "UP") return "border-emerald-400/20 bg-emerald-400/10 text-emerald-200";
-        if (health === "loading...") return "border-white/10 bg-white/5 text-white/70";
-        return "border-red-400/20 bg-red-400/10 text-red-200";
-    }, [health]);
-
-    async function refreshHealthClick() {
-        try {
-            const r = await fetch(`${API}/actuator/health`);
-            const d = await r.json();
-            setHealth(d?.status || (r.ok ? "UP" : "DOWN"));
-            setLastChecked(new Date());
-        } catch {
-            setHealth("DOWN");
-            setLastChecked(new Date());
-        }
-    }
-
-    const healthTone = useMemo(() => {
-        if (health === "UP") return "border-emerald-400/20 bg-emerald-400/10 text-emerald-200";
-        if (health === "loading...") return "border-white/10 bg-white/5 text-white/70";
-        return "border-red-400/20 bg-red-400/10 text-red-200";
-    }, [health]);
-
-    // ===== Orders (REAL) =====
     const [orders, setOrders] = useState([]);
     const [ordersMsg, setOrdersMsg] = useState("");
 
-    async function refreshOrders() {
-        setOrdersMsg("");
-        try {
-            const r = await fetch(`${API}/orders/my`, {
-                headers: {
-                    "X-User-Id": String(demoUserId),
-                    "X-Role": demoRole,
-                },
-            });
-            const d = await r.json();
-
-            if (!r.ok || d?.success === false) {
-                setOrders([]);
-                setOrdersMsg(d?.error?.message || `Failed to fetch orders (${r.status})`);
-                return;
-            }
-
-            setOrders(Array.isArray(d.data) ? d.data : []);
-        } catch {
-            setOrders([]);
-            setOrdersMsg("Failed to fetch orders (network/CORS).");
-        }
-    }
-
-    // ===== Checkout (REAL) =====
     const [checkout, setCheckout] = useState({
         productId: "2",
         qty: 1,
@@ -89,18 +97,46 @@ export default function App() {
     });
     const [checkoutMsg, setCheckoutMsg] = useState("");
 
-    async function submitCheckout(e) {
-        e.preventDefault();
+    const healthTone = useMemo(() => {
+        if (health === "UP") {
+            return "border-emerald-400/20 bg-emerald-400/10 text-emerald-200";
+        }
+        if (health === "loading...") {
+            return "border-white/10 bg-white/5 text-white/70";
+        }
+        return "border-red-400/20 bg-red-400/10 text-red-200";
+    }, [health]);
+
+    async function refreshHealth() {
+        const result = await fetchHealthData();
+        setHealth(result.health);
+        setLastChecked(result.checkedAt);
+    }
+
+    async function refreshOrders() {
+        setOrdersMsg("");
+        const result = await fetchOrdersData(demoUserId, demoRole);
+        setOrders(result.orders);
+        setOrdersMsg(result.error);
+    }
+
+    async function submitCheckout(event) {
+        event.preventDefault();
         setCheckoutMsg("Submitting...");
 
         const body = {
             address: checkout.address,
             voucherCode: checkout.voucherCode || null,
-            items: [{ productId: Number(checkout.productId), qty: Number(checkout.qty) }],
+            items: [
+                {
+                    productId: Number(checkout.productId),
+                    qty: Number(checkout.qty),
+                },
+            ],
         };
 
         try {
-            const r = await fetch(`${API}/orders/checkout`, {
+            const response = await fetch(`${API}/orders/checkout`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -109,15 +145,17 @@ export default function App() {
                 body: JSON.stringify(body),
             });
 
-            const d = await r.json();
+            const data = await response.json();
 
-            if (!r.ok || d?.success === false) {
-                setCheckoutMsg(d?.error?.message || `Checkout failed (${r.status})`);
+            if (!response.ok || data?.success === false) {
+                setCheckoutMsg(data?.error?.message || `Checkout failed (${response.status})`);
                 return;
             }
 
-            const created = d.data;
-            setCheckoutMsg(`✅ Checkout sukses. Order ID: ${created?.id} (status: ${created?.status})`);
+            const created = data.data;
+            setCheckoutMsg(
+                `✅ Checkout sukses. Order ID: ${created?.id} (status: ${created?.status})`
+            );
 
             await refreshOrders();
             await refreshHealth();
@@ -126,16 +164,32 @@ export default function App() {
         }
     }
 
-    // ✅ FIX: jangan panggil refreshHealth() dari useEffect.
-    // Taruh logika fetch langsung di effect (async IIFE).
     useEffect(() => {
-        refreshHealth();
-        refreshOrders();
-    }, []);
+        let ignore = false;
+
+        async function loadInitialData() {
+            const [healthResult, ordersResult] = await Promise.all([
+                fetchHealthData(),
+                fetchOrdersData(demoUserId, demoRole),
+            ]);
+
+            if (ignore) return;
+
+            setHealth(healthResult.health);
+            setLastChecked(healthResult.checkedAt);
+            setOrders(ordersResult.orders);
+            setOrdersMsg(ordersResult.error);
+        }
+
+        loadInitialData();
+
+        return () => {
+            ignore = true;
+        };
+    }, [demoUserId, demoRole]);
 
     return (
         <div className="min-h-screen bg-[#070A12] text-white">
-            {/* glow */}
             <div className="pointer-events-none fixed inset-0">
                 <div className="absolute -top-40 left-1/2 h-[520px] w-[720px] -translate-x-1/2 rounded-full bg-indigo-500/20 blur-3xl" />
                 <div className="absolute top-56 left-10 h-[420px] w-[420px] rounded-full bg-cyan-400/10 blur-3xl" />
@@ -143,7 +197,6 @@ export default function App() {
             </div>
 
             <div className="relative mx-auto max-w-6xl px-6 py-12">
-                {/* Header */}
                 <div className="mb-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                     <div>
                         <div className="text-xs text-white/40">Connectivity + Order MVP</div>
@@ -153,9 +206,14 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-3">
-            <span className={cx("rounded-full border px-4 py-1 text-sm font-semibold", healthTone)}>
-              HEALTH: {health}
-            </span>
+                        <span
+                            className={cx(
+                                "rounded-full border px-4 py-1 text-sm font-semibold",
+                                healthTone
+                            )}
+                        >
+                            HEALTH: {health}
+                        </span>
 
                         <button
                             onClick={async () => {
@@ -169,9 +227,7 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Grid */}
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                    {/* Checkout Card */}
                     <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur-xl">
                         <div className="mb-4 text-sm font-semibold text-white/90">Checkout (Real)</div>
 
@@ -180,7 +236,12 @@ export default function App() {
                                 <input
                                     className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 outline-none focus:border-white/20"
                                     value={checkout.productId}
-                                    onChange={(e) => setCheckout((s) => ({ ...s, productId: e.target.value }))}
+                                    onChange={(e) =>
+                                        setCheckout((prev) => ({
+                                            ...prev,
+                                            productId: e.target.value,
+                                        }))
+                                    }
                                 />
                             </Field>
 
@@ -190,30 +251,45 @@ export default function App() {
                                     min={1}
                                     className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 outline-none focus:border-white/20"
                                     value={checkout.qty}
-                                    onChange={(e) => setCheckout((s) => ({ ...s, qty: Number(e.target.value) }))}
+                                    onChange={(e) =>
+                                        setCheckout((prev) => ({
+                                            ...prev,
+                                            qty: Number(e.target.value),
+                                        }))
+                                    }
                                 />
                             </Field>
 
                             <Field label="Shipping Address">
-                <textarea
-                    rows={3}
-                    className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 outline-none focus:border-white/20"
-                    value={checkout.address}
-                    onChange={(e) => setCheckout((s) => ({ ...s, address: e.target.value }))}
-                />
+                                <textarea
+                                    rows={3}
+                                    className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 outline-none focus:border-white/20"
+                                    value={checkout.address}
+                                    onChange={(e) =>
+                                        setCheckout((prev) => ({
+                                            ...prev,
+                                            address: e.target.value,
+                                        }))
+                                    }
+                                />
                             </Field>
 
                             <Field label="Voucher Code (optional)">
                                 <input
                                     className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 outline-none focus:border-white/20"
                                     value={checkout.voucherCode}
-                                    onChange={(e) => setCheckout((s) => ({ ...s, voucherCode: e.target.value }))}
+                                    onChange={(e) =>
+                                        setCheckout((prev) => ({
+                                            ...prev,
+                                            voucherCode: e.target.value,
+                                        }))
+                                    }
                                 />
                             </Field>
 
                             <button
                                 type="submit"
-                                className="w-full rounded-xl bg-emerald-500/20 px-4 py-2 font-semibold text-emerald-100 hover:bg-emerald-500/30 transition"
+                                className="w-full rounded-xl bg-emerald-500/20 px-4 py-2 font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
                             >
                                 Submit Checkout
                             </button>
@@ -226,7 +302,6 @@ export default function App() {
                         </form>
                     </div>
 
-                    {/* Orders Table */}
                     <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur-xl lg:col-span-2">
                         <div className="mb-4 flex items-center justify-between">
                             <div className="text-sm font-semibold text-white/90">Orders (Real)</div>
@@ -260,16 +335,18 @@ export default function App() {
                                         </td>
                                     </tr>
                                 ) : (
-                                    orders.map((o) => (
-                                        <tr key={o.id} className="hover:bg-white/5">
-                                            <td className="px-4 py-3 font-semibold">{o.id}</td>
+                                    orders.map((order) => (
+                                        <tr key={order.id} className="hover:bg-white/5">
+                                            <td className="px-4 py-3 font-semibold">{order.id}</td>
                                             <td className="px-4 py-3">
-                          <span className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-xs">
-                            {o.status}
-                          </span>
+                                                    <span className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-xs">
+                                                        {order.status}
+                                                    </span>
                                             </td>
-                                            <td className="px-4 py-3">{formatRp(o.totalPaid)}</td>
-                                            <td className="px-4 py-3 text-white/60">{toIsoLocal(o.createdAt)}</td>
+                                            <td className="px-4 py-3">{formatRp(order.totalPaid)}</td>
+                                            <td className="px-4 py-3 text-white/60">
+                                                {toIsoLocal(order.createdAt)}
+                                            </td>
                                         </tr>
                                     ))
                                 )}
@@ -283,15 +360,6 @@ export default function App() {
                     </div>
                 </div>
             </div>
-        </div>
-    );
-}
-
-function Field({ label, children }) {
-    return (
-        <div>
-            <label className="text-white/60">{label}</label>
-            <div className="mt-1">{children}</div>
         </div>
     );
 }
