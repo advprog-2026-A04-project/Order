@@ -1,82 +1,38 @@
-name: Deploy Order (AWS ECR + App Runner)
+name: CD - Render Backend
 
 on:
   push:
-    branches: [ "staging", "main" ]
+    branches: ["main"]
     paths:
       - "backend/**"
-      - ".github/workflows/deploy-aws-order.yml"
+      - "Dockerfile"
+      - ".github/workflows/cd-render-backend.yml"
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Deployment target"
-        type: choice
-        required: true
-        options: [staging, prod]
-        default: staging
-
-concurrency:
-  group: deploy-aws-order
-  cancel-in-progress: false
-
-permissions:
-  contents: read
-  id-token: write
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - name: staging
-            branch: refs/heads/staging
-            env_name: aws-staging
-            tag: staging
-          - name: prod
-            branch: refs/heads/main
-            env_name: aws-prod
-            tag: prod
-
-    name: Deploy ${{ matrix.name }}
-    if: >-
-      (github.event_name == 'push' && github.ref == matrix.branch) ||
-      (github.event_name == 'workflow_dispatch' && inputs.target == matrix.name)
-
-    environment: ${{ matrix.env_name }}
-
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/setup-java@v4
         with:
-          aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          distribution: temurin
+          java-version: "21"
+      - run: chmod +x ./gradlew
+      - run: ./gradlew test --no-daemon
 
-      - name: Login to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          tags: |
-            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ matrix.tag }}
-            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ matrix.tag }}-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Trigger App Runner deployment
-        shell: bash
-        run: |
-          set -euo pipefail
-          aws apprunner start-deployment --service-arn "${APPRUNNER_SERVICE_ARN}"
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Trigger Render deploy hook
         env:
-          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "Missing secret RENDER_DEPLOY_HOOK_BACKEND"; exit 1
+          fi
+          curl -fsSL -X POST "$HOOK"

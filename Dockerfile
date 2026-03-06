@@ -1,4 +1,10 @@
-FROM ubuntu:latest
-LABEL authors="anita"
+FROM gradle:8.10-jdk21 AS build
+WORKDIR /app
+COPY backend/ .
+RUN gradle clean bootJar --no-daemon
 
-ENTRYPOINT ["top", "-b"]
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=build /app/build/libs/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java","-jar","app.jar"]
