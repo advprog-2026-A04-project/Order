@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/actuator': 'http://localhost:8080',
+      '/orders': 'http://localhost:8080',
       '/vouchers': 'http://localhost:8080',
       '/admin': 'http://localhost:8080',
     },
