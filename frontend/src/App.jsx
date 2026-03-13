@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+function apiUrl(path) {
+    return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
 function cx(...classes) {
     return classes.filter(Boolean).join(" ");
 }
@@ -38,6 +44,14 @@ async function safeJson(response) {
 }
 
 function parseApiError(status, payload) {
+    if (payload && typeof payload === "object" && payload.error && typeof payload.error === "object") {
+        const details = Array.isArray(payload.error.details) ? payload.error.details.join(", ") : "";
+        const message = typeof payload.error.message === "string" ? payload.error.message : "";
+        const composed = [message, details].filter(Boolean).join(" - ");
+        if (composed) {
+            return composed;
+        }
+    }
     if (payload && typeof payload.message === "string" && payload.message.trim()) {
         return payload.message;
     }
@@ -55,21 +69,39 @@ const STUB_PRODUCTS = [
     { id: 5, name: "Produk-5", price: 15000 },
 ];
 
-async function requestMyOrders(userId) {
-    const response = await fetch("/orders/my", {
-        headers: { "X-User-Id": userId },
-    });
-    const payload = await safeJson(response);
+function unwrapApiData(response, payload) {
+    const isEnvelope =
+        payload &&
+        typeof payload === "object" &&
+        Object.prototype.hasOwnProperty.call(payload, "success") &&
+        Object.prototype.hasOwnProperty.call(payload, "data");
 
     if (!response.ok) {
         throw new Error(parseApiError(response.status, payload));
     }
 
-    return Array.isArray(payload) ? payload : [];
+    if (!isEnvelope) {
+        return payload;
+    }
+
+    if (!payload.success) {
+        throw new Error(parseApiError(response.status, payload));
+    }
+
+    return payload.data;
+}
+
+async function requestMyOrders(userId) {
+    const response = await fetch(apiUrl("/orders/my"), {
+        headers: { "X-User-Id": userId },
+    });
+    const rawPayload = await safeJson(response);
+    const data = unwrapApiData(response, rawPayload);
+    return Array.isArray(data) ? data : [];
 }
 
 async function requestCheckout({ userId, role, idemKey, body }) {
-    const response = await fetch("/orders/checkout", {
+    const response = await fetch(apiUrl("/orders/checkout"), {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -80,17 +112,13 @@ async function requestCheckout({ userId, role, idemKey, body }) {
         body: JSON.stringify(body),
     });
 
-    const payload = await safeJson(response);
-
-    if (!response.ok) {
-        throw new Error(parseApiError(response.status, payload));
-    }
-
-    return payload;
+    const rawPayload = await safeJson(response);
+    const data = unwrapApiData(response, rawPayload);
+    return data ?? {};
 }
 
 async function requestUpdateOrderStatus({ userId, role, orderId, nextStatus }) {
-    const response = await fetch(`/orders/${orderId}/status`, {
+    const response = await fetch(apiUrl(`/orders/${orderId}/status`), {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -99,33 +127,24 @@ async function requestUpdateOrderStatus({ userId, role, orderId, nextStatus }) {
         },
         body: JSON.stringify({ nextStatus }),
     });
-    const payload = await safeJson(response);
-
-    if (!response.ok) {
-        throw new Error(parseApiError(response.status, payload));
-    }
-
-    return payload;
+    const rawPayload = await safeJson(response);
+    return unwrapApiData(response, rawPayload);
 }
 
 async function requestCancelOrder({ userId, role, orderId }) {
-    const response = await fetch(`/orders/${orderId}/cancel`, {
+    const response = await fetch(apiUrl(`/orders/${orderId}/cancel`), {
         method: "POST",
         headers: {
             "X-User-Id": userId,
             "X-Role": role,
         },
     });
-    const payload = await safeJson(response);
-
-    if (!response.ok) {
-        throw new Error(parseApiError(response.status, payload));
-    }
-
-    return payload;
+    const rawPayload = await safeJson(response);
+    return unwrapApiData(response, rawPayload);
 }
 
 function getNextStatus(currentStatus) {
+    if (currentStatus === "PENDING") return "PAID";
     if (currentStatus === "PAID") return "PURCHASED";
     if (currentStatus === "PURCHASED") return "SHIPPED";
     if (currentStatus === "SHIPPED") return "COMPLETED";
@@ -178,7 +197,7 @@ export default function App() {
 
     async function refreshHealth() {
         try {
-            const response = await fetch("/actuator/health");
+            const response = await fetch(apiUrl("/actuator/health"));
             const payload = await safeJson(response);
             setHealth(payload?.status || "DOWN");
         } catch {
@@ -347,8 +366,8 @@ export default function App() {
             return;
         }
 
-        if (!(order.status === "PAID" || order.status === "PURCHASED")) {
-            window.alert("Backend hanya mengizinkan cancel saat status PAID/PURCHASED.");
+        if (!(order.status === "PENDING" || order.status === "PAID" || order.status === "PURCHASED")) {
+            window.alert("Backend hanya mengizinkan cancel saat status PENDING/PAID/PURCHASED.");
             return;
         }
 
@@ -618,7 +637,9 @@ export default function App() {
                                                         const canEdit = canManageOrder && Boolean(nextStatus);
                                                         const canDelete =
                                                             canManageOrder &&
-                                                            (order.status === "PAID" || order.status === "PURCHASED");
+                                                            (order.status === "PENDING" ||
+                                                                order.status === "PAID" ||
+                                                                order.status === "PURCHASED");
                                                         const loading = ordersActionLoadingId === order.id;
 
                                                         return (
