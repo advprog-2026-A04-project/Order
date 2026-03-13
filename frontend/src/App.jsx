@@ -17,7 +17,16 @@ function createIdempotencyKey() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
         return `checkout-${crypto.randomUUID()}`;
     }
-    return `checkout-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        const hex = Array.from(bytes)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+        return `checkout-${hex}`;
+    }
+    // Fallback for environments without crypto: deterministic but not random
+    return `checkout-${Date.now()}`;
 }
 
 async function safeJson(response) {
