@@ -1,0 +1,7 @@
+﻿{
+  "address": "Jl. Mawar No. 1",
+  "voucherCode": "PROMO10",
+  "items": [
+    { "productId": 2, "qty": 1 }
+  ]
+}
