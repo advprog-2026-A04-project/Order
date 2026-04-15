@@ -1,121 +1,89 @@
 # Order Service
 
-Spring Boot order service with integrated frontend/backend flow for **Milestone 25% — Fondasi + Skeleton Berjalan**.  
-Service ini menangani pembuatan order sederhana, menampilkan daftar order, menyediakan health check, dan menyiapkan integrasi lanjutan dengan modul lain seperti Auth, Inventory, Wallet, dan Voucher.
+Order orchestration service for Milestone `25%` and `50%`.
 
-## Repository Links per Service
+## Deployed URL
 
-- **Frontend Order:** same repository (`frontend/`)
-- **Backend Order:** same repository (`backend/`)
-- **Database:** configured in backend environment for local/runtime usage
-- **Integrated Frontend (gabungan tim):** ganti bagian ini dengan link repo frontend tim jika diperlukan
+- `https://order-api-383620816191.us-central1.run.app`
 
-Jika tim menggunakan repository terpisah untuk frontend gabungan, tambahkan link repo tersebut di bagian ini.
+## Implemented Scope
 
-Contoh format:
-- **Order Repository:** `https://github.com/advprog-2026-A04-project/Order`
-- **Frontend Integration Repository:** `https://github.com/advprog-2026-A04-project/Frontend`
-
----
-
-## Architecture Overview
-
-Project ini menggunakan struktur berlapis agar tanggung jawab kode terpisah dengan jelas.
-
-### Backend layering
-- **Controller**: menerima request dan mengembalikan response
-- **Service**: menangani business logic order
-- **Repository**: akses data ke database
-- **Entity/Model**: representasi data order
-- **DTO**: format request/response
-- **Config**: konfigurasi aplikasi
-- **Exception/Common Response**: standar error dan format response seragam
-
-### Frontend
-Frontend menggunakan React untuk:
-- menampilkan status health service
-- mengirim request checkout
-- menampilkan daftar order
-
----
-
-## CI Quality Gates
-
-### Workflow files
-- **CI:** `.github/workflows/ci.yml`
-- **CodeQL:** `.github/workflows/codeql.yml`
-- **CD:** `.github/workflows/cd.yml`
-- **Scorecard:** `.github/workflows/scorecard.yml`
-
-### CI includes
-- Build validation
-- Test execution
-- Lint / quality checks
-- Basic verification that the service is runnable
-
-### CodeQL includes
-- Security and code quality analysis for repository code
-- Runs according to workflow trigger configuration
-
-### CD includes
-- Deployment pipeline for the service
-- Used for deployment to staging / production depending on branch setup
-
-### Scorecard includes
-- Repository security posture checks
-- Best-practice scanning for the project
-
----
-
-## Frontend-Backend-DB Integration
-
-### Current integration path
-- Frontend sends request to backend API
-- Controller receives request
-- Service layer executes business logic
-- Repository persists order data
-- Database stores order and order items
-- Frontend fetches and displays the latest order data
-
-### Current simple demo flow
-1. User opens frontend
-2. Frontend checks service health using actuator
-3. User fills checkout form
-4. Frontend sends checkout request to backend
-5. Backend creates order and stores it into database
-6. Frontend refreshes order list
-7. Created order appears on screen
-
-### Status for milestone 25%
-- Backend Order is already reachable
-- Checkout flow is already available
-- Order is persisted to DB
-- `voucherCode` field is already included in request payload
-- Voucher behavior is still minimal / stub
-
-## Main Endpoints
-
-### Health Check
 - `GET /actuator/health`
-
-Digunakan untuk memverifikasi bahwa service sedang hidup dan dapat diakses.
-
----
-
-### Create Order
 - `POST /orders/checkout`
+- `GET /orders/my`
+- `GET /orders/{id}`
 
-Membuat order baru dan menyimpannya ke database.
+Checkout flow:
+1. Read product snapshot and stock from Inventory.
+2. Validate voucher with Voucher/Promo.
+3. Calculate final total.
+4. Validate wallet balance.
+5. Deduct wallet balance.
+6. Reduce stock.
+7. Claim voucher quota.
+8. Persist order as `PAID`.
 
-#### Example request
-```json
-{
-  "address": "Jl. Mawar No. 1",
-  "voucherCode": "PROMO10",
-  "items": [
-    {
-      "productId": 2,
-      "qty": 1
-    }
-  ]
-}
+If a failure happens after the order is created, Order compensates by refunding Wallet and restoring Inventory stock before marking the order as `FAILED`.
+
+## Local Run
+
+Prerequisites:
+- Java `21`
+
+Run from `backend/`:
+
+```bash
+./gradlew bootRun
+```
+
+PowerShell:
+
+```powershell
+.\gradlew.bat bootRun
+```
+
+Default local URL:
+- `http://localhost:8080`
+
+## Environment Variables
+
+- `PORT`
+- `DB_URL`
+- `DB_DRIVER`
+- `DB_USERNAME`
+- `DB_PASSWORD`
+- `APP_CORS_ALLOWED_ORIGINS`
+- `JWT_SECRET`
+- `INTERNAL_API_TOKEN`
+- `INVENTORY_SERVICE_BASE_URL`
+- `WALLET_SERVICE_BASE_URL`
+- `VOUCHER_SERVICE_BASE_URL`
+
+Defaults are configured for an H2 file database under `/tmp`.
+
+## Test
+
+```bash
+cd backend
+./gradlew test
+```
+
+Includes:
+- real HTTP client integration coverage for checkout orchestration
+
+## Cloud Run Deploy
+
+```bash
+gcloud run deploy order-api --source . --region us-central1 --allow-unauthenticated --max-instances=1 \
+  --set-env-vars APP_CORS_ALLOWED_ORIGINS=https://advprog-frontend-m25-m50-383620816191.us-central1.run.app \
+  --set-env-vars JWT_SECRET=<shared-jwt-secret> \
+  --set-env-vars INTERNAL_API_TOKEN=<shared-internal-token> \
+  --set-env-vars INVENTORY_SERVICE_BASE_URL=https://inventory-api-383620816191.us-central1.run.app \
+  --set-env-vars WALLET_SERVICE_BASE_URL=https://wallet-api-383620816191.us-central1.run.app \
+  --set-env-vars VOUCHER_SERVICE_BASE_URL=https://voucher-promo-api-383620816191.us-central1.run.app
+```
+
+## Notes
+
+- Scope is intentionally limited to Milestone `25%` and `50%`.
+- Full order lifecycle, refund workflows, and later milestones are intentionally excluded.
