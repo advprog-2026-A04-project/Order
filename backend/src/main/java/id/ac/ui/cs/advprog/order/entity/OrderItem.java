@@ -14,8 +14,8 @@ public class OrderItem {
     @Column(nullable = false)
     private Long orderId;
 
-    @Column(nullable = false)
-    private Long productId;
+    @Column(nullable = false, length = 64)
+    private String productId;
 
     @Column(nullable = false, length = 200)
     private String productNameSnapshot;
@@ -34,8 +34,8 @@ public class OrderItem {
     public Long getId() { return id; }
     public Long getOrderId() { return orderId; }
     public void setOrderId(Long orderId) { this.orderId = orderId; }
-    public Long getProductId() { return productId; }
-    public void setProductId(Long productId) { this.productId = productId; }
+    public String getProductId() { return productId; }
+    public void setProductId(String productId) { this.productId = productId; }
     public String getProductNameSnapshot() { return productNameSnapshot; }
     public void setProductNameSnapshot(String productNameSnapshot) { this.productNameSnapshot = productNameSnapshot; }
     public BigDecimal getUnitPriceSnapshot() { return unitPriceSnapshot; }

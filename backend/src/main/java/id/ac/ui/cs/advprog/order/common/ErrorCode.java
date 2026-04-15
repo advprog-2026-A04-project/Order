@@ -3,7 +3,12 @@ package id.ac.ui.cs.advprog.order.common;
 public enum ErrorCode {
     VALIDATION_ERROR,
     UNAUTHORIZED,
+    FORBIDDEN,
+    ORDER_NOT_FOUND,
     PRODUCT_NOT_FOUND,
-    PRODUCT_NOT_AVAILABLE,
+    INSUFFICIENT_STOCK,
+    VOUCHER_INVALID,
+    WALLET_INSUFFICIENT,
+    CHECKOUT_FAILED,
     INTERNAL_ERROR
 }

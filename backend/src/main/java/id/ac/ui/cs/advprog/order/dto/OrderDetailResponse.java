@@ -16,17 +16,18 @@ public class OrderDetailResponse {
     public BigDecimal discountTotal;
     public BigDecimal totalPaid;
     public String voucherCode;
+    public String failureReason;
     public Instant createdAt;
     public List<Item> items;
 
     public static class Item {
-        public Long productId;
+        public String productId;
         public String productNameSnapshot;
         public BigDecimal unitPriceSnapshot;
         public int qty;
         public BigDecimal lineTotal;
 
-        public Item(Long productId, String productNameSnapshot, BigDecimal unitPriceSnapshot, int qty, BigDecimal lineTotal) {
+        public Item(String productId, String productNameSnapshot, BigDecimal unitPriceSnapshot, int qty, BigDecimal lineTotal) {
             this.productId = productId;
             this.productNameSnapshot = productNameSnapshot;
             this.unitPriceSnapshot = unitPriceSnapshot;
