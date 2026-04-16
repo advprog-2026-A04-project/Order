@@ -60,6 +60,19 @@ class InventoryClientTest {
     }
 
     @Test
+    void getProductShouldRejectNullBody() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("null"));
+        InventoryClient client = new InventoryClient(server.url("/").toString(), "secret");
+
+        ApiException exception = assertThrows(ApiException.class, () -> client.getProduct("P1"));
+
+        assertEquals(HttpStatus.NOT_FOUND, exception.getStatus());
+        assertEquals(ErrorCode.PRODUCT_NOT_FOUND, exception.getCode());
+    }
+
+    @Test
     void reduceStockShouldPropagateConflictOnRemoteFailure() {
         server.enqueue(new MockResponse().setResponseCode(409));
         InventoryClient client = new InventoryClient(server.url("/").toString(), "secret");

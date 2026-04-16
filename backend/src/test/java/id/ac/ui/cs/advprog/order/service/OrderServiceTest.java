@@ -132,6 +132,27 @@ class OrderServiceTest {
     }
 
     @Test
+    void checkoutShouldRejectWhenWalletBalanceIsMissing() {
+        CheckoutRequest request = request("P1", 1, null);
+        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
+                "Jl. Mawar No. 1",
+                null,
+                List.of(item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"))),
+                new BigDecimal("125000"),
+                BigDecimal.ZERO,
+                new BigDecimal("125000"),
+                2001L
+        );
+        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
+        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, null, "IDR"));
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+
+        assertEquals(ErrorCode.WALLET_INSUFFICIENT, exception.getCode());
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
     void checkoutShouldCompensateAndPersistFailureWhenVoucherClaimFails() {
         CheckoutRequest request = request("P1", 1, "MILESTONE10");
         OrderItem orderItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
@@ -173,6 +194,71 @@ class OrderServiceTest {
     }
 
     @Test
+    void checkoutShouldUseFallbackMessageWhenVoucherClaimHasNoMessage() {
+        CheckoutRequest request = request("P1", 1, "MILESTONE10");
+        OrderItem orderItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
+        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
+                "Jl. Mawar No. 1",
+                "MILESTONE10",
+                List.of(orderItem),
+                new BigDecimal("125000"),
+                new BigDecimal("5000"),
+                new BigDecimal("120000"),
+                2001L
+        );
+
+        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
+        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("500000"), "IDR"));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
+            Order order = invocation.getArgument(0);
+            if (order.getId() == null) {
+                ReflectionTestUtils.setField(order, "id", 12L);
+            }
+            return order;
+        });
+        when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
+        when(checkoutPreparationService.claimVoucher("MILESTONE10", 12L, new BigDecimal("125000"), 7L))
+                .thenReturn(new VoucherClient.VoucherClaim(false, false, "MILESTONE10", "12", new BigDecimal("125000"),
+                        null, 9, null));
+        doNothing().when(checkoutCompensationService)
+                .compensate(any(Order.class), any(Long.class), any(BigDecimal.class), anyBoolean(), anyList());
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+
+        assertEquals("Voucher claim failed.", exception.getMessage());
+    }
+
+    @Test
+    void checkoutShouldSkipVoucherClaimWhenVoucherCodeIsAbsent() {
+        CheckoutRequest request = request("P1", 1, null);
+        OrderItem orderItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
+        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
+                "Jl. Mawar No. 1",
+                null,
+                List.of(orderItem),
+                new BigDecimal("125000"),
+                BigDecimal.ZERO,
+                new BigDecimal("125000"),
+                2001L
+        );
+        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
+        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("500000"), "IDR"));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
+            Order order = invocation.getArgument(0);
+            if (order.getId() == null) {
+                ReflectionTestUtils.setField(order, "id", 13L);
+            }
+            return order;
+        });
+        when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
+
+        OrderDetailResponse response = service.checkout(7L, request);
+
+        assertEquals(OrderStatus.PAID, response.status);
+        verify(checkoutPreparationService, never()).claimVoucher(any(), any(), any(), any());
+    }
+
+    @Test
     void listMyOrdersShouldMapRepositoryResults() {
         Order order = new Order();
         ReflectionTestUtils.setField(order, "id", 3L);
@@ -201,6 +287,35 @@ class OrderServiceTest {
 
         assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals(ErrorCode.FORBIDDEN, exception.getCode());
+    }
+
+    @Test
+    void getDetailShouldRejectMissingOrder() {
+        when(orderRepository.findById(8L)).thenReturn(Optional.empty());
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.getDetail(8L, 7L, false));
+
+        assertEquals(HttpStatus.NOT_FOUND, exception.getStatus());
+        assertEquals(ErrorCode.ORDER_NOT_FOUND, exception.getCode());
+    }
+
+    @Test
+    void getDetailShouldAllowBuyerToReadOwnOrder() {
+        Order order = new Order();
+        ReflectionTestUtils.setField(order, "id", 8L);
+        order.setBuyerId(7L);
+        order.setStatus(OrderStatus.PAID);
+        order.setShippingAddress("Jl. Mawar");
+        order.setSubtotal(new BigDecimal("125000"));
+        order.setDiscountTotal(BigDecimal.ZERO);
+        order.setTotalPaid(new BigDecimal("125000"));
+        when(orderRepository.findById(8L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findByOrderId(8L)).thenReturn(List.of());
+
+        OrderDetailResponse response = service.getDetail(8L, 7L, false);
+
+        assertEquals(8L, response.id);
+        assertEquals(OrderStatus.PAID, response.status);
     }
 
     @Test

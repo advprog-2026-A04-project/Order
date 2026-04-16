@@ -58,6 +58,19 @@ class WalletClientTest {
     }
 
     @Test
+    void getBalanceShouldRejectNullBody() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("null"));
+        WalletClient client = new WalletClient(server.url("/").toString(), "secret");
+
+        ApiException exception = assertThrows(ApiException.class, () -> client.getBalance(7L));
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+        assertEquals(ErrorCode.WALLET_INSUFFICIENT, exception.getCode());
+    }
+
+    @Test
     void deductShouldMapRemoteFailureToWalletInsufficient() {
         server.enqueue(new MockResponse().setResponseCode(409));
         WalletClient client = new WalletClient(server.url("/").toString(), "secret");
