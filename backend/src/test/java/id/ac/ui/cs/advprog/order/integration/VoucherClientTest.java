@@ -72,8 +72,34 @@ class VoucherClientTest {
     }
 
     @Test
+    void validateShouldRejectNullBody() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("null"));
+        VoucherClient client = new VoucherClient(server.url("/").toString(), "secret");
+
+        ApiException exception = assertThrows(ApiException.class, () -> client.validate("MILESTONE10", new BigDecimal("125000")));
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+        assertEquals(ErrorCode.VOUCHER_INVALID, exception.getCode());
+    }
+
+    @Test
     void claimShouldMapRemoteFailureToVoucherInvalid() {
         server.enqueue(new MockResponse().setResponseCode(500));
+        VoucherClient client = new VoucherClient(server.url("/").toString(), "secret");
+
+        ApiException exception = assertThrows(ApiException.class,
+                () -> client.claim("MILESTONE10", 9L, new BigDecimal("125000"), 7L));
+
+        assertEquals(ErrorCode.VOUCHER_INVALID, exception.getCode());
+    }
+
+    @Test
+    void claimShouldRejectNullBody() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("null"));
         VoucherClient client = new VoucherClient(server.url("/").toString(), "secret");
 
         ApiException exception = assertThrows(ApiException.class,
