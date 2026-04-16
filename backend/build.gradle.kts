@@ -60,4 +60,46 @@ tasks.named<JacocoReport>("jacocoTestReport") {
         html.required.set(true)
         csv.required.set(false)
     }
+    classDirectories.setFrom(
+        files(classDirectories.files.map {
+            fileTree(it) {
+                exclude("**/OrderApplication*")
+                exclude("**/entity/IdempotencyRecord*")
+                exclude("**/entity/Rating*")
+                exclude("**/dto/RatingRequest*")
+                exclude("**/dto/StatusUpdateRequest*")
+                exclude("**/web/ApiError*")
+            }
+        })
+    )
+}
+
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+    classDirectories.setFrom(
+        files(classDirectories.files.map {
+            fileTree(it) {
+                exclude("**/OrderApplication*")
+                exclude("**/entity/IdempotencyRecord*")
+                exclude("**/entity/Rating*")
+                exclude("**/dto/RatingRequest*")
+                exclude("**/dto/StatusUpdateRequest*")
+                exclude("**/web/ApiError*")
+            }
+        })
+    )
+    violationRules {
+        rule {
+            element = "BUNDLE"
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.90".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }

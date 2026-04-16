@@ -2,7 +2,6 @@ package id.ac.ui.cs.advprog.order.service;
 
 import id.ac.ui.cs.advprog.order.common.ApiException;
 import id.ac.ui.cs.advprog.order.common.ErrorCode;
-import id.ac.ui.cs.advprog.order.dto.CheckoutItemRequest;
 import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
 import id.ac.ui.cs.advprog.order.dto.OrderDetailResponse;
 import id.ac.ui.cs.advprog.order.dto.OrderListItemResponse;
@@ -10,7 +9,6 @@ import id.ac.ui.cs.advprog.order.entity.Order;
 import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
-import id.ac.ui.cs.advprog.order.integration.VoucherClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
 import id.ac.ui.cs.advprog.order.repository.OrderItemRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderRepository;
@@ -29,86 +27,63 @@ public class OrderService {
     private final OrderItemRepository orderItemRepository;
     private final InventoryClient inventoryClient;
     private final WalletClient walletClient;
-    private final VoucherClient voucherClient;
+    private final CheckoutPreparationService checkoutPreparationService;
+    private final CheckoutCompensationService checkoutCompensationService;
 
     public OrderService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
             InventoryClient inventoryClient,
             WalletClient walletClient,
-            VoucherClient voucherClient
+            CheckoutPreparationService checkoutPreparationService,
+            CheckoutCompensationService checkoutCompensationService
     ) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.inventoryClient = inventoryClient;
         this.walletClient = walletClient;
-        this.voucherClient = voucherClient;
+        this.checkoutPreparationService = checkoutPreparationService;
+        this.checkoutCompensationService = checkoutCompensationService;
     }
 
     public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request) {
-        require(request != null, ErrorCode.VALIDATION_ERROR, "Request is required.");
-        require(request.getItems() != null && !request.getItems().isEmpty(), ErrorCode.VALIDATION_ERROR, "Items are required.");
-        require(request.getAddress() != null && !request.getAddress().isBlank(), ErrorCode.VALIDATION_ERROR, "Address is required.");
-
-        List<OrderItem> items = new ArrayList<>();
-        BigDecimal subtotal = BigDecimal.ZERO;
-        Long jastiperId = null;
-
-        for (CheckoutItemRequest itemRequest : request.getItems()) {
-            require(itemRequest.getQty() > 0, ErrorCode.VALIDATION_ERROR, "Quantity must be positive.");
-
-            InventoryClient.ProductSnapshot product = inventoryClient.getProduct(itemRequest.getProductId());
-            if (product.stock() == null || product.stock() < itemRequest.getQty()) {
-                throw new ApiException(HttpStatus.CONFLICT, ErrorCode.INSUFFICIENT_STOCK, "Inventory stock is insufficient.");
-            }
-
-            BigDecimal lineTotal = product.price().multiply(BigDecimal.valueOf(itemRequest.getQty()));
-            subtotal = subtotal.add(lineTotal);
-
-            OrderItem item = new OrderItem();
-            item.setProductId(product.id());
-            item.setProductNameSnapshot(product.name());
-            item.setUnitPriceSnapshot(product.price());
-            item.setQty(itemRequest.getQty());
-            item.setLineTotal(lineTotal);
-            items.add(item);
-
-            if (jastiperId == null && product.jastiperId() != null && product.jastiperId().matches("\\d+")) {
-                jastiperId = Long.valueOf(product.jastiperId());
-            }
-        }
-
-        VoucherClient.VoucherValidation voucherValidation = voucherClient.validate(request.getVoucherCode(), subtotal);
-        if (request.getVoucherCode() != null && !request.getVoucherCode().isBlank() && !voucherValidation.valid()) {
-            throw new ApiException(HttpStatus.CONFLICT, ErrorCode.VOUCHER_INVALID,
-                    voucherValidation.message() == null ? "Voucher is invalid." : voucherValidation.message());
-        }
-
-        BigDecimal discount = voucherValidation.discountAmount() == null ? BigDecimal.ZERO : voucherValidation.discountAmount();
-        BigDecimal totalPaid = subtotal.subtract(discount).max(BigDecimal.ZERO);
+        CheckoutPreparationService.PreparedCheckout preparedCheckout = checkoutPreparationService.prepare(request);
 
         WalletClient.WalletBalance walletBalance = walletClient.getBalance(buyerId);
-        if (walletBalance.balance() == null || walletBalance.balance().compareTo(totalPaid) < 0) {
+        if (walletBalance.balance() == null || walletBalance.balance().compareTo(preparedCheckout.totalPaid()) < 0) {
             throw new ApiException(HttpStatus.CONFLICT, ErrorCode.WALLET_INSUFFICIENT, "Wallet balance is insufficient.");
         }
 
-        Order order = createPendingOrder(buyerId, jastiperId, request.getAddress(), subtotal, discount, totalPaid, request.getVoucherCode());
-        persistItems(order, items);
+        Order order = createPendingOrder(
+                buyerId,
+                preparedCheckout.jastiperId(),
+                preparedCheckout.shippingAddress(),
+                preparedCheckout.subtotal(),
+                preparedCheckout.discount(),
+                preparedCheckout.totalPaid(),
+                preparedCheckout.voucherCode()
+        );
+        persistItems(order, preparedCheckout.items());
 
         boolean walletDeducted = false;
         List<OrderItem> reducedItems = new ArrayList<>();
 
         try {
-            walletClient.deduct(buyerId, order.getId(), totalPaid);
+            walletClient.deduct(buyerId, order.getId(), preparedCheckout.totalPaid());
             walletDeducted = true;
 
-            for (OrderItem item : items) {
+            for (OrderItem item : preparedCheckout.items()) {
                 inventoryClient.reduceStock(item.getProductId(), item.getQty());
                 reducedItems.add(item);
             }
 
-            if (request.getVoucherCode() != null && !request.getVoucherCode().isBlank()) {
-                VoucherClient.VoucherClaim claim = voucherClient.claim(request.getVoucherCode(), order.getId(), subtotal, buyerId);
+            if (preparedCheckout.voucherCode() != null) {
+                var claim = checkoutPreparationService.claimVoucher(
+                        preparedCheckout.voucherCode(),
+                        order.getId(),
+                        preparedCheckout.subtotal(),
+                        buyerId
+                );
                 if (!claim.success()) {
                     throw new ApiException(HttpStatus.CONFLICT, ErrorCode.VOUCHER_INVALID,
                             claim.message() == null ? "Voucher claim failed." : claim.message());
@@ -119,9 +94,9 @@ public class OrderService {
             order.setFailureReason(null);
             order.setUpdatedAt(Instant.now());
             orderRepository.save(order);
-            return toDetail(order, items);
+            return toDetail(order, preparedCheckout.items());
         } catch (ApiException exception) {
-            compensate(order, buyerId, totalPaid, walletDeducted, reducedItems);
+            checkoutCompensationService.compensate(order, buyerId, preparedCheckout.totalPaid(), walletDeducted, reducedItems);
             order.setStatus(OrderStatus.FAILED);
             order.setFailureReason(exception.getMessage());
             order.setUpdatedAt(Instant.now());
@@ -180,23 +155,6 @@ public class OrderService {
             item.setOrderId(order.getId());
         }
         orderItemRepository.saveAll(items);
-    }
-
-    private void compensate(Order order, Long buyerId, BigDecimal totalPaid, boolean walletDeducted, List<OrderItem> reducedItems) {
-        if (walletDeducted) {
-            walletClient.refund(buyerId, order.getId(), totalPaid);
-            order.setRefundDone(true);
-        }
-
-        for (OrderItem item : reducedItems) {
-            inventoryClient.restoreStock(item.getProductId(), item.getQty());
-        }
-    }
-
-    private void require(boolean condition, ErrorCode errorCode, String message) {
-        if (!condition) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, errorCode, message);
-        }
     }
 
     private OrderDetailResponse toDetail(Order order, List<OrderItem> items) {
