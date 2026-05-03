@@ -1,33 +1,39 @@
 # Order Service
 
-Order orchestration service for Milestone `25%` and `50%`.
+Order orchestration service for JSON Milestone `75%`.
 
-## Deployed URL
+## Scope
 
-- `https://order-api-383620816191.us-central1.run.app`
-
-## Implemented Scope
-
-- `GET /actuator/health`
 - `POST /orders/checkout`
 - `GET /orders/my`
+- `GET /orders/my/active`
+- `GET /orders/jastiper`
+- `GET /orders/admin`
 - `GET /orders/{id}`
+- `PATCH /orders/{id}/status`
+- `POST /orders/{id}/cancel`
+- `POST /orders/{id}/rating`
+- `GET /actuator/health`
 
-Checkout flow:
-1. Read product snapshot and stock from Inventory.
-2. Validate voucher with Voucher/Promo.
-3. Calculate final total.
-4. Validate wallet balance.
-5. Deduct wallet balance.
-6. Reduce stock.
-7. Claim voucher quota.
-8. Persist order as `PAID`.
+Lifecycle support:
 
-If a failure happens after the order is created, Order compensates by refunding Wallet and restoring Inventory stock before marking the order as `FAILED`.
+- `PAID -> PURCHASED -> SHIPPED -> COMPLETED`
+- `CANCELLED` with refund
+- invalid transition rejection
+- idempotent cancellation refund
+
+Checkout orchestration remains here:
+
+1. read product and stock from Inventory
+2. validate voucher with Voucher/Promo
+3. validate and deduct wallet balance through Wallet
+4. persist order state
+5. restore/compensate on downstream failure
 
 ## Local Run
 
 Prerequisites:
+
 - Java `21`
 
 Run from `backend/`:
@@ -43,6 +49,7 @@ PowerShell:
 ```
 
 Default local URL:
+
 - `http://localhost:8080`
 
 ## Environment Variables
@@ -59,7 +66,7 @@ Default local URL:
 - `WALLET_SERVICE_BASE_URL`
 - `VOUCHER_SERVICE_BASE_URL`
 
-Defaults are configured for an H2 file database under `/tmp`.
+Defaults use an H2 file database under `/tmp`.
 
 ## Test
 
@@ -68,22 +75,35 @@ cd backend
 ./gradlew test
 ```
 
-Includes:
-- real HTTP client integration coverage for checkout orchestration
+Coverage includes:
 
-## Cloud Run Deploy
+- checkout orchestration
+- lifecycle transition validation
+- cancel/refund behavior
+- refund idempotency
+- rating rules
+- active/jastiper/admin order views
+
+## Deployment
+
+Target platform: Google Cloud Run.
+
+Basic deploy:
 
 ```bash
-gcloud run deploy order-api --source . --region us-central1 --allow-unauthenticated --max-instances=1 \
-  --set-env-vars APP_CORS_ALLOWED_ORIGINS=https://advprog-frontend-m25-m50-383620816191.us-central1.run.app \
-  --set-env-vars JWT_SECRET=<shared-jwt-secret> \
-  --set-env-vars INTERNAL_API_TOKEN=<shared-internal-token> \
-  --set-env-vars INVENTORY_SERVICE_BASE_URL=https://inventory-api-383620816191.us-central1.run.app \
-  --set-env-vars WALLET_SERVICE_BASE_URL=https://wallet-api-383620816191.us-central1.run.app \
-  --set-env-vars VOUCHER_SERVICE_BASE_URL=https://voucher-promo-api-383620816191.us-central1.run.app
+gcloud run deploy order-api --source . --region us-central1 --allow-unauthenticated --max-instances=1
 ```
 
-## Notes
+The service should keep the already configured Cloud Run env values for:
 
-- Scope is intentionally limited to Milestone `25%` and `50%`.
-- Full order lifecycle, refund workflows, and later milestones are intentionally excluded.
+- shared `JWT_SECRET`
+- `INTERNAL_API_TOKEN`
+- Inventory base URL
+- Wallet base URL
+- Voucher base URL
+- allowed frontend origins
+
+## Risks
+
+- The service expects downstream Inventory, Wallet, and Voucher URLs to stay aligned with the deployed demo stack.
+- Cancellation is intentionally limited to `PAID` and `PURCHASED`.
