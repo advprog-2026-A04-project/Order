@@ -18,6 +18,9 @@ public class OrderDetailResponse {
     public String voucherCode;
     public String failureReason;
     public Instant createdAt;
+    public Instant updatedAt;
+    public boolean refundDone;
+    public RatingSummary rating;
     public List<Item> items;
 
     public static class Item {
@@ -33,6 +36,20 @@ public class OrderDetailResponse {
             this.unitPriceSnapshot = unitPriceSnapshot;
             this.qty = qty;
             this.lineTotal = lineTotal;
+        }
+    }
+
+    public static class RatingSummary {
+        public int productRating;
+        public int jastiperRating;
+        public String comment;
+        public Instant createdAt;
+
+        public RatingSummary(int productRating, int jastiperRating, String comment, Instant createdAt) {
+            this.productRating = productRating;
+            this.jastiperRating = jastiperRating;
+            this.comment = comment;
+            this.createdAt = createdAt;
         }
     }
 }

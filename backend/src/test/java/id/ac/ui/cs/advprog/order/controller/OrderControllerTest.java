@@ -22,6 +22,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -103,7 +104,15 @@ class OrderControllerTest {
     @Test
     void myOrdersShouldReturnMappedResponse() throws Exception {
         when(orderService.listMyOrders(7L)).thenReturn(List.of(
-                new OrderListItemResponse(5L, OrderStatus.PAID, new BigDecimal("225000"), Instant.parse("2026-04-16T10:15:30Z"))
+                new OrderListItemResponse(
+                        5L,
+                        7L,
+                        2001L,
+                        OrderStatus.PAID,
+                        new BigDecimal("225000"),
+                        Instant.parse("2026-04-16T10:15:30Z"),
+                        Instant.parse("2026-04-16T10:16:30Z")
+                )
         ));
 
         mockMvc.perform(get("/orders/my").principal(authentication("7", "ROLE_TITIPER")))
@@ -113,13 +122,32 @@ class OrderControllerTest {
     }
 
     @Test
+    void myActiveOrdersShouldReturnMappedResponse() throws Exception {
+        when(orderService.listMyActiveOrders(7L)).thenReturn(List.of(
+                new OrderListItemResponse(
+                        5L,
+                        7L,
+                        2001L,
+                        OrderStatus.SHIPPED,
+                        new BigDecimal("225000"),
+                        Instant.parse("2026-04-16T10:15:30Z"),
+                        Instant.parse("2026-04-16T10:16:30Z")
+                )
+        ));
+
+        mockMvc.perform(get("/orders/my/active").principal(authentication("7", "ROLE_TITIPER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].status").value("SHIPPED"));
+    }
+
+    @Test
     void detailShouldAllowAdminAccess() throws Exception {
         OrderDetailResponse response = new OrderDetailResponse();
         response.id = 9L;
         response.status = OrderStatus.PAID;
         response.totalPaid = new BigDecimal("4050000");
         response.voucherCode = "MILESTONE10";
-        when(orderService.getDetail(9L, 1L, true)).thenReturn(response);
+        when(orderService.getDetail(9L, 1L, true, false)).thenReturn(response);
 
         mockMvc.perform(get("/orders/9").principal(authentication("1", "ROLE_ADMIN")))
                 .andExpect(status().isOk())
@@ -136,6 +164,59 @@ class OrderControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.error.details[0]").exists());
+    }
+
+    @Test
+    void updateStatusShouldAllowJastiper() throws Exception {
+        OrderDetailResponse response = new OrderDetailResponse();
+        response.id = 9L;
+        response.status = OrderStatus.PURCHASED;
+        when(orderService.updateStatus(9L, 2001L, false, OrderStatus.PURCHASED)).thenReturn(response);
+
+        mockMvc.perform(patch("/orders/9/status")
+                        .principal(authentication("2001", "ROLE_JASTIPER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "nextStatus": "PURCHASED"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PURCHASED"));
+    }
+
+    @Test
+    void cancelOrderShouldAllowJastiper() throws Exception {
+        OrderDetailResponse response = new OrderDetailResponse();
+        response.id = 9L;
+        response.status = OrderStatus.CANCELLED;
+        when(orderService.cancelOrder(9L, 2001L, false)).thenReturn(response);
+
+        mockMvc.perform(post("/orders/9/cancel")
+                        .principal(authentication("2001", "ROLE_JASTIPER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+    }
+
+    @Test
+    void submitRatingShouldAllowTitiper() throws Exception {
+        OrderDetailResponse response = new OrderDetailResponse();
+        response.id = 9L;
+        response.status = OrderStatus.COMPLETED;
+        when(orderService.submitRating(any(Long.class), any(Long.class), any())).thenReturn(response);
+
+        mockMvc.perform(post("/orders/9/rating")
+                        .principal(authentication("7", "ROLE_TITIPER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "productRating": 5,
+                                  "jastiperRating": 4,
+                                  "comment": "Great service"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
     }
 
     private static UsernamePasswordAuthenticationToken authentication(String userId, String role) {

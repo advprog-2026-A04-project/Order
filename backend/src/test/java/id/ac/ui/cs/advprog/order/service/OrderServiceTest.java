@@ -6,14 +6,17 @@ import id.ac.ui.cs.advprog.order.dto.CheckoutItemRequest;
 import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
 import id.ac.ui.cs.advprog.order.dto.OrderDetailResponse;
 import id.ac.ui.cs.advprog.order.dto.OrderListItemResponse;
+import id.ac.ui.cs.advprog.order.dto.RatingRequest;
 import id.ac.ui.cs.advprog.order.entity.Order;
 import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
+import id.ac.ui.cs.advprog.order.entity.Rating;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
 import id.ac.ui.cs.advprog.order.integration.VoucherClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
 import id.ac.ui.cs.advprog.order.repository.OrderItemRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderRepository;
+import id.ac.ui.cs.advprog.order.repository.RatingRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -42,6 +45,7 @@ class OrderServiceTest {
 
     private OrderRepository orderRepository;
     private OrderItemRepository orderItemRepository;
+    private RatingRepository ratingRepository;
     private InventoryClient inventoryClient;
     private WalletClient walletClient;
     private CheckoutPreparationService checkoutPreparationService;
@@ -52,6 +56,7 @@ class OrderServiceTest {
     void setUp() {
         orderRepository = mock(OrderRepository.class);
         orderItemRepository = mock(OrderItemRepository.class);
+        ratingRepository = mock(RatingRepository.class);
         inventoryClient = mock(InventoryClient.class);
         walletClient = mock(WalletClient.class);
         checkoutPreparationService = mock(CheckoutPreparationService.class);
@@ -59,11 +64,13 @@ class OrderServiceTest {
         service = new OrderService(
                 orderRepository,
                 orderItemRepository,
+                ratingRepository,
                 inventoryClient,
                 walletClient,
                 checkoutPreparationService,
                 checkoutCompensationService
         );
+        when(ratingRepository.findByOrderId(any(Long.class))).thenReturn(Optional.empty());
     }
 
     @Test
@@ -91,8 +98,10 @@ class OrderServiceTest {
         });
         when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
         when(checkoutPreparationService.claimVoucher("MILESTONE10", 99L, new BigDecimal("250000"), 7L))
-                .thenReturn(new VoucherClient.VoucherClaim(true, false, "MILESTONE10", "99", new BigDecimal("250000"),
-                        new BigDecimal("25000"), 9, "ok"));
+                .thenReturn(new VoucherClient.VoucherClaim(
+                        true, false, "MILESTONE10", "99", new BigDecimal("250000"),
+                        new BigDecimal("25000"), 9, "ok"
+                ));
 
         OrderDetailResponse response = service.checkout(7L, request);
 
@@ -177,8 +186,10 @@ class OrderServiceTest {
         });
         when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
         when(checkoutPreparationService.claimVoucher("MILESTONE10", 11L, new BigDecimal("125000"), 7L))
-                .thenReturn(new VoucherClient.VoucherClaim(false, false, "MILESTONE10", "11", new BigDecimal("125000"),
-                        null, 9, "voucher invalid"));
+                .thenReturn(new VoucherClient.VoucherClaim(
+                        false, false, "MILESTONE10", "11", new BigDecimal("125000"),
+                        null, 9, "voucher invalid"
+                ));
         doNothing().when(checkoutCompensationService)
                 .compensate(any(Order.class), any(Long.class), any(BigDecimal.class), any(Boolean.class), anyList());
 
@@ -218,8 +229,10 @@ class OrderServiceTest {
         });
         when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
         when(checkoutPreparationService.claimVoucher("MILESTONE10", 12L, new BigDecimal("125000"), 7L))
-                .thenReturn(new VoucherClient.VoucherClaim(false, false, "MILESTONE10", "12", new BigDecimal("125000"),
-                        null, 9, null));
+                .thenReturn(new VoucherClient.VoucherClaim(
+                        false, false, "MILESTONE10", "12", new BigDecimal("125000"),
+                        null, 9, null
+                ));
         doNothing().when(checkoutCompensationService)
                 .compensate(any(Order.class), any(Long.class), any(BigDecimal.class), anyBoolean(), anyList());
 
@@ -262,6 +275,7 @@ class OrderServiceTest {
     void listMyOrdersShouldMapRepositoryResults() {
         Order order = new Order();
         ReflectionTestUtils.setField(order, "id", 3L);
+        order.setBuyerId(7L);
         order.setStatus(OrderStatus.PAID);
         order.setTotalPaid(new BigDecimal("450000"));
         Instant createdAt = Instant.parse("2026-04-16T10:15:30Z");
@@ -272,8 +286,27 @@ class OrderServiceTest {
 
         assertEquals(1, responses.size());
         assertEquals(3L, responses.getFirst().id);
+        assertEquals(7L, responses.getFirst().buyerId);
         assertEquals(OrderStatus.PAID, responses.getFirst().status);
         assertEquals(createdAt, responses.getFirst().createdAt);
+    }
+
+    @Test
+    void listMyActiveOrdersShouldOnlyReturnActiveStatuses() {
+        Order order = new Order();
+        ReflectionTestUtils.setField(order, "id", 4L);
+        order.setBuyerId(7L);
+        order.setStatus(OrderStatus.SHIPPED);
+        order.setTotalPaid(new BigDecimal("300000"));
+        order.setCreatedAt(Instant.parse("2026-04-16T10:15:30Z"));
+        order.setUpdatedAt(Instant.parse("2026-04-17T10:15:30Z"));
+        when(orderRepository.findByBuyerIdAndStatusInOrderByUpdatedAtDesc(any(Long.class), any()))
+                .thenReturn(List.of(order));
+
+        List<OrderListItemResponse> responses = service.listMyActiveOrders(7L);
+
+        assertEquals(1, responses.size());
+        assertEquals(OrderStatus.SHIPPED, responses.getFirst().status);
     }
 
     @Test
@@ -283,7 +316,7 @@ class OrderServiceTest {
         order.setBuyerId(99L);
         when(orderRepository.findById(8L)).thenReturn(Optional.of(order));
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.getDetail(8L, 7L, false));
+        ApiException exception = assertThrows(ApiException.class, () -> service.getDetail(8L, 7L, false, false));
 
         assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals(ErrorCode.FORBIDDEN, exception.getCode());
@@ -293,7 +326,7 @@ class OrderServiceTest {
     void getDetailShouldRejectMissingOrder() {
         when(orderRepository.findById(8L)).thenReturn(Optional.empty());
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.getDetail(8L, 7L, false));
+        ApiException exception = assertThrows(ApiException.class, () -> service.getDetail(8L, 7L, false, false));
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatus());
         assertEquals(ErrorCode.ORDER_NOT_FOUND, exception.getCode());
@@ -312,7 +345,7 @@ class OrderServiceTest {
         when(orderRepository.findById(8L)).thenReturn(Optional.of(order));
         when(orderItemRepository.findByOrderId(8L)).thenReturn(List.of());
 
-        OrderDetailResponse response = service.getDetail(8L, 7L, false);
+        OrderDetailResponse response = service.getDetail(8L, 7L, false, false);
 
         assertEquals(8L, response.id);
         assertEquals(OrderStatus.PAID, response.status);
@@ -337,7 +370,7 @@ class OrderServiceTest {
         when(orderRepository.findById(8L)).thenReturn(Optional.of(order));
         when(orderItemRepository.findByOrderId(8L)).thenReturn(List.of(item));
 
-        OrderDetailResponse response = service.getDetail(8L, 7L, true);
+        OrderDetailResponse response = service.getDetail(8L, 7L, true, false);
 
         assertEquals(8L, response.id);
         assertEquals(OrderStatus.PAID, response.status);
@@ -345,6 +378,75 @@ class OrderServiceTest {
         assertEquals(1, response.items.size());
         assertEquals("P1", response.items.getFirst().productId);
         assertNull(response.failureReason);
+    }
+
+    @Test
+    void updateStatusShouldAllowPaidToPurchased() {
+        Order order = buildLifecycleOrder(15L, OrderStatus.PAID);
+        when(orderRepository.findById(15L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderItemRepository.findByOrderId(15L)).thenReturn(List.of());
+
+        OrderDetailResponse response = service.updateStatus(15L, 2001L, false, OrderStatus.PURCHASED);
+
+        assertEquals(OrderStatus.PURCHASED, response.status);
+    }
+
+    @Test
+    void updateStatusShouldRejectIllegalTransition() {
+        Order order = buildLifecycleOrder(15L, OrderStatus.PAID);
+        when(orderRepository.findById(15L)).thenReturn(Optional.of(order));
+
+        ApiException exception = assertThrows(
+                ApiException.class,
+                () -> service.updateStatus(15L, 2001L, false, OrderStatus.COMPLETED)
+        );
+
+        assertEquals(ErrorCode.INVALID_ORDER_STATUS_TRANSITION, exception.getCode());
+    }
+
+    @Test
+    void cancelOrderShouldRefundAndMarkOrderCancelled() {
+        Order order = buildLifecycleOrder(21L, OrderStatus.PAID);
+        when(orderRepository.findById(21L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderItemRepository.findByOrderId(21L)).thenReturn(List.of());
+
+        OrderDetailResponse response = service.cancelOrder(21L, 2001L, false);
+
+        assertEquals(OrderStatus.CANCELLED, response.status);
+        verify(walletClient).refund(7L, 21L, new BigDecimal("125000"));
+    }
+
+    @Test
+    void cancelOrderShouldBeIdempotentForCancelledOrders() {
+        Order order = buildLifecycleOrder(22L, OrderStatus.CANCELLED);
+        order.setRefundDone(true);
+        when(orderRepository.findById(22L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findByOrderId(22L)).thenReturn(List.of());
+
+        OrderDetailResponse response = service.cancelOrder(22L, 2001L, false);
+
+        assertEquals(OrderStatus.CANCELLED, response.status);
+        verify(walletClient, never()).refund(any(Long.class), any(Long.class), any(BigDecimal.class));
+    }
+
+    @Test
+    void submitRatingShouldPersistForCompletedOrder() {
+        Order order = buildLifecycleOrder(23L, OrderStatus.COMPLETED);
+        when(orderRepository.findById(23L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findByOrderId(23L)).thenReturn(List.of());
+        when(ratingRepository.save(any(Rating.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RatingRequest request = new RatingRequest();
+        request.setProductRating(5);
+        request.setJastiperRating(4);
+        request.setComment("Arrived as expected");
+
+        OrderDetailResponse response = service.submitRating(23L, 7L, request);
+
+        assertEquals(OrderStatus.COMPLETED, response.status);
+        verify(ratingRepository).save(any(Rating.class));
     }
 
     private static CheckoutRequest request(String productId, int quantity, String voucherCode) {
@@ -366,5 +468,20 @@ class OrderServiceTest {
         item.setUnitPriceSnapshot(unitPrice);
         item.setLineTotal(lineTotal);
         return item;
+    }
+
+    private static Order buildLifecycleOrder(Long orderId, OrderStatus status) {
+        Order order = new Order();
+        ReflectionTestUtils.setField(order, "id", orderId);
+        order.setBuyerId(7L);
+        order.setJastiperId(2001L);
+        order.setStatus(status);
+        order.setShippingAddress("Jl. Mawar");
+        order.setSubtotal(new BigDecimal("125000"));
+        order.setDiscountTotal(BigDecimal.ZERO);
+        order.setTotalPaid(new BigDecimal("125000"));
+        order.setCreatedAt(Instant.parse("2026-04-16T10:15:30Z"));
+        order.setUpdatedAt(Instant.parse("2026-04-16T10:15:30Z"));
+        return order;
     }
 }

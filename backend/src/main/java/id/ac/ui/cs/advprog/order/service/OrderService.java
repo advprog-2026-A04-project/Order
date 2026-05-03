@@ -5,16 +5,20 @@ import id.ac.ui.cs.advprog.order.common.ErrorCode;
 import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
 import id.ac.ui.cs.advprog.order.dto.OrderDetailResponse;
 import id.ac.ui.cs.advprog.order.dto.OrderListItemResponse;
+import id.ac.ui.cs.advprog.order.dto.RatingRequest;
 import id.ac.ui.cs.advprog.order.entity.Order;
 import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
+import id.ac.ui.cs.advprog.order.entity.Rating;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
 import id.ac.ui.cs.advprog.order.repository.OrderItemRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderRepository;
+import id.ac.ui.cs.advprog.order.repository.RatingRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -22,9 +26,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class OrderService {
+    private static final EnumSet<OrderStatus> ACTIVE_STATUSES =
+            EnumSet.of(OrderStatus.PAID, OrderStatus.PURCHASED, OrderStatus.SHIPPED);
+    private static final EnumSet<OrderStatus> CANCELLABLE_STATUSES =
+            EnumSet.of(OrderStatus.PAID, OrderStatus.PURCHASED);
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
+    private final RatingRepository ratingRepository;
     private final InventoryClient inventoryClient;
     private final WalletClient walletClient;
     private final CheckoutPreparationService checkoutPreparationService;
@@ -33,6 +42,7 @@ public class OrderService {
     public OrderService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
+            RatingRepository ratingRepository,
             InventoryClient inventoryClient,
             WalletClient walletClient,
             CheckoutPreparationService checkoutPreparationService,
@@ -40,6 +50,7 @@ public class OrderService {
     ) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
+        this.ratingRepository = ratingRepository;
         this.inventoryClient = inventoryClient;
         this.walletClient = walletClient;
         this.checkoutPreparationService = checkoutPreparationService;
@@ -109,20 +120,177 @@ public class OrderService {
     public List<OrderListItemResponse> listMyOrders(Long buyerId) {
         return orderRepository.findByBuyerIdOrderByCreatedAtDesc(buyerId)
                 .stream()
-                .map(order -> new OrderListItemResponse(order.getId(), order.getStatus(), order.getTotalPaid(), order.getCreatedAt()))
+                .map(this::toListItem)
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public OrderDetailResponse getDetail(Long orderId, Long actorId, boolean isAdmin) {
+    public List<OrderListItemResponse> listMyActiveOrders(Long buyerId) {
+        return orderRepository.findByBuyerIdAndStatusInOrderByUpdatedAtDesc(buyerId, ACTIVE_STATUSES)
+                .stream()
+                .map(this::toListItem)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderListItemResponse> listJastiperOrders(Long actorId, boolean isAdmin) {
+        List<Order> orders = isAdmin
+                ? orderRepository.findAllByOrderByUpdatedAtDesc()
+                : orderRepository.findByJastiperIdOrderByCreatedAtDesc(actorId);
+        return orders.stream()
+                .map(this::toListItem)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderListItemResponse> listAdminOrders() {
+        return orderRepository.findAllByOrderByUpdatedAtDesc()
+                .stream()
+                .map(this::toListItem)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public OrderDetailResponse getDetail(Long orderId, Long actorId, boolean isAdmin, boolean isJastiper) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.ORDER_NOT_FOUND, "Order not found."));
 
-        if (!isAdmin && !order.getBuyerId().equals(actorId)) {
+        boolean canAccess = isAdmin
+                || order.getBuyerId().equals(actorId)
+                || (isJastiper && order.getJastiperId() != null && order.getJastiperId().equals(actorId));
+        if (!canAccess) {
             throw new ApiException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, "You do not have access to this order.");
         }
 
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
+    }
+
+    @Transactional
+    public OrderDetailResponse updateStatus(Long orderId, Long actorId, boolean isAdmin, OrderStatus nextStatus) {
+        if (nextStatus == null || nextStatus == OrderStatus.CANCELLED) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.INVALID_ORDER_STATUS_TRANSITION,
+                    "Use the cancel endpoint for cancellations."
+            );
+        }
+
+        Order order = requireOrder(orderId);
+        requireJastiperOrAdminAccess(order, actorId, isAdmin);
+        ensureValidTransition(order.getStatus(), nextStatus);
+
+        order.setStatus(nextStatus);
+        order.setUpdatedAt(Instant.now());
+        return toDetail(orderRepository.save(order), orderItemRepository.findByOrderId(orderId));
+    }
+
+    @Transactional
+    public OrderDetailResponse cancelOrder(Long orderId, Long actorId, boolean isAdmin) {
+        Order order = requireOrder(orderId);
+        requireJastiperOrAdminAccess(order, actorId, isAdmin);
+
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            if (!order.isRefundDone()) {
+                walletClient.refund(order.getBuyerId(), order.getId(), order.getTotalPaid());
+                order.setRefundDone(true);
+                order.setUpdatedAt(Instant.now());
+                orderRepository.save(order);
+            }
+            return toDetail(order, orderItemRepository.findByOrderId(orderId));
+        }
+
+        if (!CANCELLABLE_STATUSES.contains(order.getStatus())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.ORDER_CANCELLATION_NOT_ALLOWED,
+                    "This order can no longer be cancelled."
+            );
+        }
+
+        walletClient.refund(order.getBuyerId(), order.getId(), order.getTotalPaid());
+        order.setStatus(OrderStatus.CANCELLED);
+        order.setRefundDone(true);
+        order.setFailureReason(null);
+        order.setUpdatedAt(Instant.now());
+
+        return toDetail(orderRepository.save(order), orderItemRepository.findByOrderId(orderId));
+    }
+
+    @Transactional
+    public OrderDetailResponse submitRating(Long orderId, Long actorId, RatingRequest request) {
+        Order order = requireOrder(orderId);
+        if (!order.getBuyerId().equals(actorId)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, "You do not have access to this order.");
+        }
+        if (order.getStatus() != OrderStatus.COMPLETED) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.ORDER_NOT_COMPLETED,
+                    "Ratings can only be submitted after an order is completed."
+            );
+        }
+        if (ratingRepository.findByOrderId(orderId).isPresent()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.ORDER_ALREADY_RATED,
+                    "A rating has already been submitted for this order."
+            );
+        }
+
+        Rating rating = new Rating();
+        rating.setOrderId(orderId);
+        rating.setBuyerId(actorId);
+        rating.setProductRating(request.getProductRating());
+        rating.setJastiperRating(request.getJastiperRating());
+        rating.setComment(normalizeComment(request.getComment()));
+        rating.setCreatedAt(Instant.now());
+        ratingRepository.save(rating);
+
+        return toDetail(order, orderItemRepository.findByOrderId(orderId));
+    }
+
+    private void requireJastiperOrAdminAccess(Order order, Long actorId, boolean isAdmin) {
+        if (isAdmin) {
+            return;
+        }
+        if (order.getJastiperId() != null && order.getJastiperId().equals(actorId)) {
+            return;
+        }
+        throw new ApiException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, "You do not have access to this order.");
+    }
+
+    private void ensureValidTransition(OrderStatus currentStatus, OrderStatus nextStatus) {
+        boolean valid = switch (currentStatus) {
+            case PAID -> nextStatus == OrderStatus.PURCHASED;
+            case PURCHASED -> nextStatus == OrderStatus.SHIPPED;
+            case SHIPPED -> nextStatus == OrderStatus.COMPLETED;
+            default -> false;
+        };
+
+        if (!valid) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INVALID_ORDER_STATUS_TRANSITION,
+                    "Illegal order status transition: " + currentStatus + " -> " + nextStatus + "."
+            );
+        }
+    }
+
+    private Order requireOrder(Long orderId) {
+        return orderRepository.findById(orderId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.ORDER_NOT_FOUND, "Order not found."));
+    }
+
+    private OrderListItemResponse toListItem(Order order) {
+        return new OrderListItemResponse(
+                order.getId(),
+                order.getBuyerId(),
+                order.getJastiperId(),
+                order.getStatus(),
+                order.getTotalPaid(),
+                order.getCreatedAt(),
+                order.getUpdatedAt()
+        );
     }
 
     private Order createPendingOrder(
@@ -170,6 +338,16 @@ public class OrderService {
         response.voucherCode = order.getVoucherCode();
         response.failureReason = order.getFailureReason();
         response.createdAt = order.getCreatedAt();
+        response.updatedAt = order.getUpdatedAt();
+        response.refundDone = order.isRefundDone();
+        response.rating = ratingRepository.findByOrderId(order.getId())
+                .map(rating -> new OrderDetailResponse.RatingSummary(
+                        rating.getProductRating(),
+                        rating.getJastiperRating(),
+                        rating.getComment(),
+                        rating.getCreatedAt()
+                ))
+                .orElse(null);
         response.items = items.stream()
                 .map(item -> new OrderDetailResponse.Item(
                         item.getProductId(),
@@ -180,5 +358,13 @@ public class OrderService {
                 ))
                 .toList();
         return response;
+    }
+
+    private String normalizeComment(String comment) {
+        if (comment == null) {
+            return null;
+        }
+        String normalized = comment.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 }
