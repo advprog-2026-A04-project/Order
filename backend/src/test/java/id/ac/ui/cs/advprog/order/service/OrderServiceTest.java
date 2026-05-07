@@ -1,370 +1,548 @@
 package id.ac.ui.cs.advprog.order.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import id.ac.ui.cs.advprog.order.common.ApiException;
 import id.ac.ui.cs.advprog.order.common.ErrorCode;
-import id.ac.ui.cs.advprog.order.dto.CheckoutItemRequest;
-import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
+import id.ac.ui.cs.advprog.order.common.GlobalExceptionHandler;
+import id.ac.ui.cs.advprog.order.controller.OrderController;
 import id.ac.ui.cs.advprog.order.dto.OrderDetailResponse;
 import id.ac.ui.cs.advprog.order.dto.OrderListItemResponse;
-import id.ac.ui.cs.advprog.order.entity.Order;
-import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
-import id.ac.ui.cs.advprog.order.integration.InventoryClient;
-import id.ac.ui.cs.advprog.order.integration.VoucherClient;
-import id.ac.ui.cs.advprog.order.integration.WalletClient;
-import id.ac.ui.cs.advprog.order.repository.OrderItemRepository;
-import id.ac.ui.cs.advprog.order.repository.OrderRepository;
+import id.ac.ui.cs.advprog.order.service.OrderService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.http.HttpStatus;
-import org.springframework.test.util.ReflectionTestUtils;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.Mockito.atLeast;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-class OrderServiceTest {
-
-    private OrderRepository orderRepository;
-    private OrderItemRepository orderItemRepository;
-    private InventoryClient inventoryClient;
-    private WalletClient walletClient;
-    private CheckoutPreparationService checkoutPreparationService;
-    private CheckoutCompensationService checkoutCompensationService;
-    private OrderService service;
+class OrderControllerTest {
+    private final OrderService orderService = mock(OrderService.class);
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        orderRepository = mock(OrderRepository.class);
-        orderItemRepository = mock(OrderItemRepository.class);
-        inventoryClient = mock(InventoryClient.class);
-        walletClient = mock(WalletClient.class);
-        checkoutPreparationService = mock(CheckoutPreparationService.class);
-        checkoutCompensationService = mock(CheckoutCompensationService.class);
-        service = new OrderService(
-                orderRepository,
-                orderItemRepository,
-                inventoryClient,
-                walletClient,
-                checkoutPreparationService,
-                checkoutCompensationService
-        );
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(new OrderController(orderService))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
     }
 
-    @Test
-    void checkoutShouldPersistPaidOrderAndReduceDependencies() {
-        CheckoutRequest request = request("P1", 2, " MILESTONE10 ");
-        OrderItem orderItem = item("P1", "Shoes", 2, new BigDecimal("125000"), new BigDecimal("250000"));
-        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
-                "Jl. Mawar No. 1",
-                "MILESTONE10",
-                List.of(orderItem),
-                new BigDecimal("250000"),
-                new BigDecimal("25000"),
-                new BigDecimal("225000"),
-                2001L
-        );
+    @Nested
+    class CheckoutEndpointTests {
 
-        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
-        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("500000"), "IDR"));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
-            Order order = invocation.getArgument(0);
-            if (order.getId() == null) {
-                ReflectionTestUtils.setField(order, "id", 99L);
-            }
-            return order;
-        });
-        when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
-        when(checkoutPreparationService.claimVoucher("MILESTONE10", 99L, new BigDecimal("250000"), 7L))
-                .thenReturn(new VoucherClient.VoucherClaim(true, false, "MILESTONE10", "99", new BigDecimal("250000"),
-                        new BigDecimal("25000"), 9, "ok"));
+        @Test
+        void shouldReturnCreatedForTitiper() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(5L, "225000");
+            when(orderService.checkout(any(Long.class), any())).thenReturn(response);
 
-        OrderDetailResponse response = service.checkout(7L, request);
+            mockMvc.perform(post("/orders/checkout")
+                            .principal(auth("7", "ROLE_TITIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(checkoutBody("P1", 1, "MILESTONE10")))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").value(5))
+                    .andExpect(jsonPath("$.data.status").value("PAID"));
 
-        assertEquals(99L, response.id);
-        assertEquals(OrderStatus.PAID, response.status);
-        assertEquals(new BigDecimal("225000"), response.totalPaid);
-        assertEquals("MILESTONE10", response.voucherCode);
-        assertEquals(1, response.items.size());
-        verify(walletClient).deduct(7L, 99L, new BigDecimal("225000"));
-        verify(inventoryClient).reduceStock("P1", 2);
-        verify(checkoutPreparationService).claimVoucher("MILESTONE10", 99L, new BigDecimal("250000"), 7L);
-        verify(checkoutCompensationService, never()).compensate(any(), any(), any(), anyBoolean(), anyList());
+            verify(orderService).checkout(eq(7L), any());
+        }
+
+        @Test
+        void shouldRejectWhenNoAuthentication() throws Exception {
+            mockMvc.perform(post("/orders/checkout")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(checkoutBody("P1", 1, null)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+        }
+
+        @Test
+        void shouldRejectWhenRoleIsAdmin() throws Exception {
+            mockMvc.perform(post("/orders/checkout")
+                            .principal(auth("1", "ROLE_ADMIN"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(checkoutBody("P1", 1, null)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+        }
+
+        @Test
+        void shouldRejectWhenRoleIsJastiper() throws Exception {
+            mockMvc.perform(post("/orders/checkout")
+                            .principal(auth("2001", "ROLE_JASTIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(checkoutBody("P1", 1, null)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+        }
+
+        @Test
+        void shouldReturn400WhenRequestBodyIsInvalid() throws Exception {
+            mockMvc.perform(post("/orders/checkout")
+                            .principal(auth("7", "ROLE_TITIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"address\":\"\",\"items\":[]}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        }
+
+        @Test
+        void shouldSurfaceServiceExceptionAsConflict() throws Exception {
+            when(orderService.checkout(any(), any()))
+                    .thenThrow(new ApiException(HttpStatus.CONFLICT,
+                            ErrorCode.WALLET_INSUFFICIENT, "Wallet balance is insufficient."));
+
+            mockMvc.perform(post("/orders/checkout")
+                            .principal(auth("7", "ROLE_TITIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(checkoutBody("P1", 1, null)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error.code").value("WALLET_INSUFFICIENT"));
+        }
     }
 
-    @Test
-    void checkoutShouldRejectWhenWalletBalanceIsInsufficient() {
-        CheckoutRequest request = request("P1", 1, null);
-        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
-                "Jl. Mawar No. 1",
-                null,
-                List.of(item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"))),
-                new BigDecimal("125000"),
-                BigDecimal.ZERO,
-                new BigDecimal("125000"),
-                2001L
-        );
-        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
-        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("100000"), "IDR"));
+    @Nested
+    class MyOrdersEndpointTests {
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+        @Test
+        void shouldReturnOrderListForTitiper() throws Exception {
+            when(orderService.listMyOrders(7L)).thenReturn(List.of(
+                    listItemResponse(5L, OrderStatus.PAID, "225000")));
 
-        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
-        assertEquals(ErrorCode.WALLET_INSUFFICIENT, exception.getCode());
-        verify(orderRepository, never()).save(any(Order.class));
-        verify(walletClient, never()).deduct(any(), any(), any());
-        verify(inventoryClient, never()).reduceStock(any(), anyInt());
+            mockMvc.perform(get("/orders/my")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[0].id").value(5))
+                    .andExpect(jsonPath("$.data[0].status").value("PAID"));
+        }
+
+        @Test
+        void shouldRejectAdminFromMyOrders() throws Exception {
+            mockMvc.perform(get("/orders/my")
+                            .principal(auth("1", "ROLE_ADMIN")))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void shouldRejectUnauthenticatedRequest() throws Exception {
+            mockMvc.perform(get("/orders/my"))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 
-    @Test
-    void checkoutShouldRejectWhenWalletBalanceIsMissing() {
-        CheckoutRequest request = request("P1", 1, null);
-        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
-                "Jl. Mawar No. 1",
-                null,
-                List.of(item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"))),
-                new BigDecimal("125000"),
-                BigDecimal.ZERO,
-                new BigDecimal("125000"),
-                2001L
-        );
-        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
-        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, null, "IDR"));
+    @Nested
+    class MyActiveOrdersEndpointTests {
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+        @Test
+        void shouldReturnActiveOrdersForTitiper() throws Exception {
+            when(orderService.listActiveOrders(7L)).thenReturn(List.of(
+                    listItemResponse(5L, OrderStatus.PAID, "225000"),
+                    listItemResponse(6L, OrderStatus.PURCHASED, "100000")));
 
-        assertEquals(ErrorCode.WALLET_INSUFFICIENT, exception.getCode());
-        verify(orderRepository, never()).save(any(Order.class));
+            mockMvc.perform(get("/orders/my/active")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(2))
+                    .andExpect(jsonPath("$.data[0].status").value("PAID"))
+                    .andExpect(jsonPath("$.data[1].status").value("PURCHASED"));
+        }
+
+        @Test
+        void shouldReturnEmptyListWhenNoActiveOrders() throws Exception {
+            when(orderService.listActiveOrders(7L)).thenReturn(List.of());
+
+            mockMvc.perform(get("/orders/my/active")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(0));
+        }
+
+        @Test
+        void shouldRejectJastiperFromActiveOrders() throws Exception {
+            mockMvc.perform(get("/orders/my/active")
+                            .principal(auth("2001", "ROLE_JASTIPER")))
+                    .andExpect(status().isForbidden());
+        }
     }
 
-    @Test
-    void checkoutShouldCompensateAndPersistFailureWhenVoucherClaimFails() {
-        CheckoutRequest request = request("P1", 1, "MILESTONE10");
-        OrderItem orderItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
-        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
-                "Jl. Mawar No. 1",
-                "MILESTONE10",
-                List.of(orderItem),
-                new BigDecimal("125000"),
-                new BigDecimal("5000"),
-                new BigDecimal("120000"),
-                2001L
-        );
+    @Nested
+    class JastiperOrdersEndpointTests {
 
-        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
-        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("500000"), "IDR"));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
-            Order order = invocation.getArgument(0);
-            if (order.getId() == null) {
-                ReflectionTestUtils.setField(order, "id", 11L);
-            }
-            return order;
-        });
-        when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
-        when(checkoutPreparationService.claimVoucher("MILESTONE10", 11L, new BigDecimal("125000"), 7L))
-                .thenReturn(new VoucherClient.VoucherClaim(false, false, "MILESTONE10", "11", new BigDecimal("125000"),
-                        null, 9, "voucher invalid"));
-        doNothing().when(checkoutCompensationService)
-                .compensate(any(Order.class), any(Long.class), any(BigDecimal.class), any(Boolean.class), anyList());
+        @Test
+        void shouldReturnOrdersForJastiper() throws Exception {
+            when(orderService.listJastiperOrders(2001L)).thenReturn(List.of(
+                    listItemResponse(3L, OrderStatus.PAID, "300000"),
+                    listItemResponse(4L, OrderStatus.PURCHASED, "200000")));
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+            mockMvc.perform(get("/orders/jastiper")
+                            .principal(auth("2001", "ROLE_JASTIPER")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(2));
+        }
 
-        assertEquals(ErrorCode.VOUCHER_INVALID, exception.getCode());
-        verify(checkoutCompensationService).compensate(any(Order.class), any(Long.class), any(BigDecimal.class), anyBoolean(), anyList());
-        ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
-        verify(orderRepository, atLeast(2)).save(orderCaptor.capture());
-        Order failedOrder = orderCaptor.getAllValues().get(orderCaptor.getAllValues().size() - 1);
-        assertEquals(OrderStatus.FAILED, failedOrder.getStatus());
-        assertEquals("voucher invalid", failedOrder.getFailureReason());
+        @Test
+        void shouldRejectTitiperFromJastiperEndpoint() throws Exception {
+            mockMvc.perform(get("/orders/jastiper")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void shouldRejectUnauthenticatedRequest() throws Exception {
+            mockMvc.perform(get("/orders/jastiper"))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 
-    @Test
-    void checkoutShouldUseFallbackMessageWhenVoucherClaimHasNoMessage() {
-        CheckoutRequest request = request("P1", 1, "MILESTONE10");
-        OrderItem orderItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
-        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
-                "Jl. Mawar No. 1",
-                "MILESTONE10",
-                List.of(orderItem),
-                new BigDecimal("125000"),
-                new BigDecimal("5000"),
-                new BigDecimal("120000"),
-                2001L
-        );
 
-        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
-        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("500000"), "IDR"));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
-            Order order = invocation.getArgument(0);
-            if (order.getId() == null) {
-                ReflectionTestUtils.setField(order, "id", 12L);
-            }
-            return order;
-        });
-        when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
-        when(checkoutPreparationService.claimVoucher("MILESTONE10", 12L, new BigDecimal("125000"), 7L))
-                .thenReturn(new VoucherClient.VoucherClaim(false, false, "MILESTONE10", "12", new BigDecimal("125000"),
-                        null, 9, null));
-        doNothing().when(checkoutCompensationService)
-                .compensate(any(Order.class), any(Long.class), any(BigDecimal.class), anyBoolean(), anyList());
+    @Nested
+    class AdminOrdersEndpointTests {
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+        @Test
+        void shouldReturnAllOrdersForAdmin() throws Exception {
+            when(orderService.listAdminOrders()).thenReturn(List.of(
+                    listItemResponse(1L, OrderStatus.PAID, "100000"),
+                    listItemResponse(2L, OrderStatus.COMPLETED, "200000"),
+                    listItemResponse(3L, OrderStatus.CANCELLED, "150000")));
 
-        assertEquals("Voucher claim failed.", exception.getMessage());
+            mockMvc.perform(get("/orders/admin")
+                            .principal(auth("1", "ROLE_ADMIN")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(3));
+        }
+
+        @Test
+        void shouldRejectTitiperFromAdminEndpoint() throws Exception {
+            mockMvc.perform(get("/orders/admin")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void shouldRejectJastiperFromAdminEndpoint() throws Exception {
+            mockMvc.perform(get("/orders/admin")
+                            .principal(auth("2001", "ROLE_JASTIPER")))
+                    .andExpect(status().isForbidden());
+        }
     }
 
-    @Test
-    void checkoutShouldSkipVoucherClaimWhenVoucherCodeIsAbsent() {
-        CheckoutRequest request = request("P1", 1, null);
-        OrderItem orderItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
-        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
-                "Jl. Mawar No. 1",
-                null,
-                List.of(orderItem),
-                new BigDecimal("125000"),
-                BigDecimal.ZERO,
-                new BigDecimal("125000"),
-                2001L
-        );
-        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
-        when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("500000"), "IDR"));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
-            Order order = invocation.getArgument(0);
-            if (order.getId() == null) {
-                ReflectionTestUtils.setField(order, "id", 13L);
-            }
-            return order;
-        });
-        when(orderItemRepository.saveAll(anyList())).thenReturn(List.of(orderItem));
+    @Nested
+    class DetailEndpointTests {
 
-        OrderDetailResponse response = service.checkout(7L, request);
+        @Test
+        void shouldAllowTitiperToReadOwnOrder() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(9L, "225000");
+            response.voucherCode = "MILESTONE10";
+            when(orderService.getDetail(9L, 7L, false)).thenReturn(response);
 
-        assertEquals(OrderStatus.PAID, response.status);
-        verify(checkoutPreparationService, never()).claimVoucher(any(), any(), any(), any());
+            mockMvc.perform(get("/orders/9")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(9))
+                    .andExpect(jsonPath("$.data.voucherCode").value("MILESTONE10"));
+        }
+
+        @Test
+        void shouldAllowAdminToReadAnyOrder() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(9L, "225000");
+            when(orderService.getDetail(9L, 1L, true)).thenReturn(response);
+
+            mockMvc.perform(get("/orders/9")
+                            .principal(auth("1", "ROLE_ADMIN")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(9));
+        }
+
+        @Test
+        void shouldAllowJastiperToReadOrder() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(9L, "225000");
+            when(orderService.getDetail(9L, 2001L, false)).thenReturn(response);
+
+            mockMvc.perform(get("/orders/9")
+                            .principal(auth("2001", "ROLE_JASTIPER")))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void shouldReturn404WhenOrderNotFound() throws Exception {
+            when(orderService.getDetail(eq(99L), any(), anyBoolean()))
+                    .thenThrow(new ApiException(HttpStatus.NOT_FOUND,
+                            ErrorCode.ORDER_NOT_FOUND, "Order not found."));
+
+            mockMvc.perform(get("/orders/99")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code").value("ORDER_NOT_FOUND"));
+        }
+
+        @Test
+        void shouldReturn403WhenBuyerAccessesDifferentOrder() throws Exception {
+            when(orderService.getDetail(eq(9L), eq(7L), eq(false)))
+                    .thenThrow(new ApiException(HttpStatus.FORBIDDEN,
+                            ErrorCode.FORBIDDEN, "You do not have access."));
+
+            mockMvc.perform(get("/orders/9")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+        }
     }
 
-    @Test
-    void listMyOrdersShouldMapRepositoryResults() {
-        Order order = new Order();
-        ReflectionTestUtils.setField(order, "id", 3L);
-        order.setStatus(OrderStatus.PAID);
-        order.setTotalPaid(new BigDecimal("450000"));
-        Instant createdAt = Instant.parse("2026-04-16T10:15:30Z");
-        order.setCreatedAt(createdAt);
-        when(orderRepository.findByBuyerIdOrderByCreatedAtDesc(7L)).thenReturn(List.of(order));
+    @Nested
+    class UpdateStatusEndpointTests {
 
-        List<OrderListItemResponse> responses = service.listMyOrders(7L);
+        @Test
+        void shouldAllowJastiperToAdvanceStatus() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(1L, "100000");
+            response.status = OrderStatus.PURCHASED;
+            when(orderService.updateStatus(eq(1L), eq(2001L),
+                    eq(false), eq(true), eq(OrderStatus.PURCHASED)))
+                    .thenReturn(response);
 
-        assertEquals(1, responses.size());
-        assertEquals(3L, responses.getFirst().id);
-        assertEquals(OrderStatus.PAID, responses.getFirst().status);
-        assertEquals(createdAt, responses.getFirst().createdAt);
+            mockMvc.perform(patch("/orders/1/status")
+                            .principal(auth("2001", "ROLE_JASTIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"nextStatus\":\"PURCHASED\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("PURCHASED"));
+        }
+
+        @Test
+        void shouldAllowAdminToAdvanceStatus() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(1L, "100000");
+            response.status = OrderStatus.PURCHASED;
+            when(orderService.updateStatus(eq(1L), eq(1L),
+                    eq(true), eq(false), eq(OrderStatus.PURCHASED)))
+                    .thenReturn(response);
+
+            mockMvc.perform(patch("/orders/1/status")
+                            .principal(auth("1", "ROLE_ADMIN"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"nextStatus\":\"PURCHASED\"}"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void shouldAllowTitiperToConfirmCompleted() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(1L, "100000");
+            response.status = OrderStatus.COMPLETED;
+            when(orderService.updateStatus(eq(1L), eq(7L),
+                    eq(false), eq(false), eq(OrderStatus.COMPLETED)))
+                    .thenReturn(response);
+
+            mockMvc.perform(patch("/orders/1/status")
+                            .principal(auth("7", "ROLE_TITIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"nextStatus\":\"COMPLETED\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+        }
+
+        @Test
+        void shouldReturn409WhenTransitionIsInvalid() throws Exception {
+            when(orderService.updateStatus(any(), any(), anyBoolean(), anyBoolean(), any()))
+                    .thenThrow(new ApiException(HttpStatus.CONFLICT,
+                            ErrorCode.INVALID_STATUS_TRANSITION,
+                            "Invalid status transition."));
+
+            mockMvc.perform(patch("/orders/1/status")
+                            .principal(auth("2001", "ROLE_JASTIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"nextStatus\":\"COMPLETED\"}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error.code").value("INVALID_STATUS_TRANSITION"));
+        }
+
+        @Test
+        void shouldRejectUnauthenticatedRequest() throws Exception {
+            mockMvc.perform(patch("/orders/1/status")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"nextStatus\":\"PURCHASED\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 
-    @Test
-    void getDetailShouldRejectForbiddenAccessForDifferentBuyer() {
-        Order order = new Order();
-        ReflectionTestUtils.setField(order, "id", 8L);
-        order.setBuyerId(99L);
-        when(orderRepository.findById(8L)).thenReturn(Optional.of(order));
+    @Nested
+    class CancelEndpointTests {
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.getDetail(8L, 7L, false));
+        @Test
+        void shouldAllowJastiperToCancel() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(1L, "100000");
+            response.status = OrderStatus.CANCELLED;
+            response.refundDone = true;
+            when(orderService.cancel(eq(1L), eq(2001L), eq(false), eq(true)))
+                    .thenReturn(response);
 
-        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
-        assertEquals(ErrorCode.FORBIDDEN, exception.getCode());
+            mockMvc.perform(post("/orders/1/cancel")
+                            .principal(auth("2001", "ROLE_JASTIPER")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("CANCELLED"))
+                    .andExpect(jsonPath("$.data.refundDone").value(true));
+        }
+
+        @Test
+        void shouldAllowAdminToCancel() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(1L, "100000");
+            response.status = OrderStatus.CANCELLED;
+            when(orderService.cancel(eq(1L), eq(1L), eq(true), eq(false)))
+                    .thenReturn(response);
+
+            mockMvc.perform(post("/orders/1/cancel")
+                            .principal(auth("1", "ROLE_ADMIN")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+        }
+
+        @Test
+        void shouldRejectTitiperFromCancelling() throws Exception {
+            mockMvc.perform(post("/orders/1/cancel")
+                            .principal(auth("7", "ROLE_TITIPER")))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+        }
+
+        @Test
+        void shouldReturn409WhenCancelNotAllowed() throws Exception {
+            when(orderService.cancel(any(), any(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new ApiException(HttpStatus.CONFLICT,
+                            ErrorCode.CANCEL_NOT_ALLOWED,
+                            "Order cannot be cancelled at this stage."));
+
+            mockMvc.perform(post("/orders/1/cancel")
+                            .principal(auth("2001", "ROLE_JASTIPER")))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error.code").value("CANCEL_NOT_ALLOWED"));
+        }
+
+        @Test
+        void shouldRejectUnauthenticatedRequest() throws Exception {
+            mockMvc.perform(post("/orders/1/cancel"))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 
-    @Test
-    void getDetailShouldRejectMissingOrder() {
-        when(orderRepository.findById(8L)).thenReturn(Optional.empty());
+    @Nested
+    class RatingEndpointTests {
 
-        ApiException exception = assertThrows(ApiException.class, () -> service.getDetail(8L, 7L, false));
+        @Test
+        void shouldAllowTitiperToSubmitRating() throws Exception {
+            OrderDetailResponse response = paidDetailResponse(1L, "100000");
+            response.status = OrderStatus.COMPLETED;
+            when(orderService.rate(eq(1L), eq(7L), any())).thenReturn(response);
 
-        assertEquals(HttpStatus.NOT_FOUND, exception.getStatus());
-        assertEquals(ErrorCode.ORDER_NOT_FOUND, exception.getCode());
+            mockMvc.perform(post("/orders/1/rating")
+                            .principal(auth("7", "ROLE_TITIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"productRating\":5,\"jastiperRating\":4,\"comment\":\"Mantap!\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
+
+            verify(orderService).rate(eq(1L), eq(7L), any());
+        }
+
+        @Test
+        void shouldRejectJastiperFromSubmittingRating() throws Exception {
+            mockMvc.perform(post("/orders/1/rating")
+                            .principal(auth("2001", "ROLE_JASTIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"productRating\":5,\"jastiperRating\":4}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void shouldRejectAdminFromSubmittingRating() throws Exception {
+            mockMvc.perform(post("/orders/1/rating")
+                            .principal(auth("1", "ROLE_ADMIN"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"productRating\":5,\"jastiperRating\":4}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void shouldReturn409WhenOrderNotCompleted() throws Exception {
+            when(orderService.rate(any(), any(), any()))
+                    .thenThrow(new ApiException(HttpStatus.CONFLICT,
+                            ErrorCode.RATING_ONLY_WHEN_COMPLETED,
+                            "Rating is only allowed after the order is completed."));
+
+            mockMvc.perform(post("/orders/1/rating")
+                            .principal(auth("7", "ROLE_TITIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"productRating\":5,\"jastiperRating\":4}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error.code").value("RATING_ONLY_WHEN_COMPLETED"));
+        }
+
+        @Test
+        void shouldReturn409WhenRatingAlreadyExists() throws Exception {
+            when(orderService.rate(any(), any(), any()))
+                    .thenThrow(new ApiException(HttpStatus.CONFLICT,
+                            ErrorCode.RATING_ALREADY_EXISTS,
+                            "Rating already exists."));
+
+            mockMvc.perform(post("/orders/1/rating")
+                            .principal(auth("7", "ROLE_TITIPER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"productRating\":5,\"jastiperRating\":4}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error.code").value("RATING_ALREADY_EXISTS"));
+        }
+
+        @Test
+        void shouldRejectUnauthenticatedRequest() throws Exception {
+            mockMvc.perform(post("/orders/1/rating")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"productRating\":5,\"jastiperRating\":4}"))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 
-    @Test
-    void getDetailShouldAllowBuyerToReadOwnOrder() {
-        Order order = new Order();
-        ReflectionTestUtils.setField(order, "id", 8L);
-        order.setBuyerId(7L);
-        order.setStatus(OrderStatus.PAID);
-        order.setShippingAddress("Jl. Mawar");
-        order.setSubtotal(new BigDecimal("125000"));
-        order.setDiscountTotal(BigDecimal.ZERO);
-        order.setTotalPaid(new BigDecimal("125000"));
-        when(orderRepository.findById(8L)).thenReturn(Optional.of(order));
-        when(orderItemRepository.findByOrderId(8L)).thenReturn(List.of());
-
-        OrderDetailResponse response = service.getDetail(8L, 7L, false);
-
-        assertEquals(8L, response.id);
-        assertEquals(OrderStatus.PAID, response.status);
+    private static UsernamePasswordAuthenticationToken auth(String userId, String role) {
+        return new UsernamePasswordAuthenticationToken(
+                userId, null,
+                List.of(new SimpleGrantedAuthority(role)));
     }
 
-    @Test
-    void getDetailShouldReturnOrderItemsForAdmin() {
-        Order order = new Order();
-        ReflectionTestUtils.setField(order, "id", 8L);
-        order.setBuyerId(99L);
-        order.setJastiperId(2001L);
-        order.setStatus(OrderStatus.PAID);
-        order.setShippingAddress("Jl. Mawar");
-        order.setSubtotal(new BigDecimal("125000"));
-        order.setDiscountTotal(new BigDecimal("5000"));
-        order.setTotalPaid(new BigDecimal("120000"));
-        order.setVoucherCode("MILESTONE10");
-        order.setCreatedAt(Instant.parse("2026-04-16T10:15:30Z"));
-
-        OrderItem item = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
-
-        when(orderRepository.findById(8L)).thenReturn(Optional.of(order));
-        when(orderItemRepository.findByOrderId(8L)).thenReturn(List.of(item));
-
-        OrderDetailResponse response = service.getDetail(8L, 7L, true);
-
-        assertEquals(8L, response.id);
-        assertEquals(OrderStatus.PAID, response.status);
-        assertEquals("MILESTONE10", response.voucherCode);
-        assertEquals(1, response.items.size());
-        assertEquals("P1", response.items.getFirst().productId);
-        assertNull(response.failureReason);
+    private static OrderDetailResponse paidDetailResponse(Long id, String totalPaid) {
+        OrderDetailResponse r = new OrderDetailResponse();
+        r.id = id;
+        r.status = OrderStatus.PAID;
+        r.totalPaid = new BigDecimal(totalPaid);
+        r.buyerId = 7L;
+        r.items = List.of();
+        return r;
     }
 
-    private static CheckoutRequest request(String productId, int quantity, String voucherCode) {
-        CheckoutRequest request = new CheckoutRequest();
-        request.setAddress("Jl. Mawar No. 1");
-        request.setVoucherCode(voucherCode);
-        CheckoutItemRequest item = new CheckoutItemRequest();
-        item.setProductId(productId);
-        item.setQty(quantity);
-        request.setItems(List.of(item));
-        return request;
+    private static OrderListItemResponse listItemResponse(Long id, OrderStatus status,
+                                                           String totalPaid) {
+        return new OrderListItemResponse(
+                id, status, new BigDecimal(totalPaid),
+                Instant.parse("2026-04-16T10:15:30Z"),
+                null, false, List.of());
     }
 
-    private static OrderItem item(String productId, String name, int quantity, BigDecimal unitPrice, BigDecimal lineTotal) {
-        OrderItem item = new OrderItem();
-        item.setProductId(productId);
-        item.setProductNameSnapshot(name);
-        item.setQty(quantity);
-        item.setUnitPriceSnapshot(unitPrice);
-        item.setLineTotal(lineTotal);
-        return item;
+    private static String checkoutBody(String productId, int qty, String voucherCode) {
+        String voucher = voucherCode != null ? "\"" + voucherCode + "\"" : "null";
+        return """
+                {
+                  "address": "Jl. Mawar No. 1",
+                  "voucherCode": %s,
+                  "items": [{ "productId": "%s", "qty": %d }]
+                }
+                """.formatted(voucher, productId, qty);
     }
 }
