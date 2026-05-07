@@ -38,8 +38,14 @@ public class Order {
     @Column(length = 50)
     private String voucherCode;
 
+    @Column(length = 500)
+    private String failureReason;
+
     @Column(nullable = false)
     private Instant createdAt;
+
+    @Column(nullable = false)
+    private Instant updatedAt;
 
     // untuk idempotency cancel/refund (dummy)
     @Column(nullable = false)
@@ -64,8 +70,12 @@ public class Order {
     public void setTotalPaid(BigDecimal totalPaid) { this.totalPaid = totalPaid; }
     public String getVoucherCode() { return voucherCode; }
     public void setVoucherCode(String voucherCode) { this.voucherCode = voucherCode; }
+    public String getFailureReason() { return failureReason; }
+    public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
     public boolean isRefundDone() { return refundDone; }
     public void setRefundDone(boolean refundDone) { this.refundDone = refundDone; }
 }
