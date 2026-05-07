@@ -6,5 +6,8 @@ public enum OrderStatus {
     PURCHASED,
     SHIPPED,
     COMPLETED,
+    PURCHASED,
+    SHIPPED,
+    COMPLETED,
     CANCELLED
 }
