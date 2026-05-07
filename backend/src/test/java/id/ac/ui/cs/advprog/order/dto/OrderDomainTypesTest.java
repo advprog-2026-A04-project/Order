@@ -58,13 +58,19 @@ class OrderDomainTypesTest {
         orderItem.setQty(2);
         orderItem.setLineTotal(new BigDecimal("250000"));
 
-        OrderListItemResponse listItem = new OrderListItemResponse(9L, OrderStatus.PAID, new BigDecimal("225000"), Instant.parse("2026-04-16T10:15:30Z"));
-        OrderDetailResponse.Item detailItem = new OrderDetailResponse.Item("P1", "Shoes", new BigDecimal("125000"), 2, new BigDecimal("250000"));
+        OrderDetailResponse.Item detailItem = new OrderDetailResponse.Item(
+                "P1", "Shoes", new BigDecimal("125000"), 2, new BigDecimal("250000"));
+
+        OrderListItemResponse listItem = new OrderListItemResponse(
+                9L, OrderStatus.PAID, new BigDecimal("225000"),
+                Instant.parse("2026-04-16T10:15:30Z"),
+                "MILESTONE10", false, List.of(detailItem));
 
         assertEquals("P1", checkoutRequest.getItems().getFirst().getProductId());
         assertEquals("MILESTONE10", checkoutRequest.getVoucherCode());
         assertEquals("Shoes", orderItem.getProductNameSnapshot());
         assertEquals(9L, listItem.id);
+        assertEquals("MILESTONE10", listItem.voucherCode);
         assertEquals("Shoes", detailItem.productNameSnapshot);
     }
 }
