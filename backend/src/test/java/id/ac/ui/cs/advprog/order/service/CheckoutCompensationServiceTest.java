@@ -31,7 +31,7 @@ class CheckoutCompensationServiceTest {
         service.compensate(order, 7L, new BigDecimal("150000"), true, List.of(item));
 
         verify(walletClient).refund(7L, 5L, new BigDecimal("150000"));
-        verify(inventoryClient).restoreStock("P1", 2);
+        verify(inventoryClient).restoreStock("P1", 2, 5L);
         assertEquals(true, order.isRefundDone());
     }
 
@@ -49,7 +49,7 @@ class CheckoutCompensationServiceTest {
         service.compensate(order, 7L, new BigDecimal("150000"), false, List.of(item));
 
         verify(walletClient, never()).refund(7L, 5L, new BigDecimal("150000"));
-        verify(inventoryClient).restoreStock("P1", 2);
+        verify(inventoryClient).restoreStock("P1", 2, 5L);
         assertEquals(false, order.isRefundDone());
     }
 }

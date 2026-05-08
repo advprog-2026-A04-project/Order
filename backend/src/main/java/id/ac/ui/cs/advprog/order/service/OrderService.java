@@ -74,7 +74,7 @@ public class OrderService {
             walletDeducted = true;
 
             for (OrderItem item : prepared.items()) {
-                inventoryClient.reduceStock(item.getProductId(), item.getQty());
+                inventoryClient.reduceStock(item.getProductId(), item.getQty(), order.getId());
                 reducedItems.add(item);
             }
 
@@ -224,7 +224,7 @@ public class OrderService {
 
             List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
             for (OrderItem item : items) {
-                inventoryClient.restoreStock(item.getProductId(), item.getQty());
+                inventoryClient.restoreStock(item.getProductId(), item.getQty(), order.getId());
             }
         }
 

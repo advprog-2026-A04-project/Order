@@ -26,7 +26,7 @@ public class CheckoutCompensationService {
         }
 
         for (OrderItem item : reducedItems) {
-            inventoryClient.restoreStock(item.getProductId(), item.getQty());
+            inventoryClient.restoreStock(item.getProductId(), item.getQty(), order.getId());
         }
     }
 }

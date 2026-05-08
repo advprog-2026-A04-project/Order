@@ -39,25 +39,34 @@ public class InventoryClient {
         }
     }
 
-    public void reduceStock(String productId, int quantity) {
-        mutateStock("/api/products/inventory/reduce-stock", productId, quantity, ErrorCode.INSUFFICIENT_STOCK);
+    public void reduceStock(String productId, int quantity, Long orderId) {
+        mutateStock("/api/products/inventory/reduce-stock", productId, quantity, orderId, "reduce", ErrorCode.INSUFFICIENT_STOCK);
     }
 
-    public void restoreStock(String productId, int quantity) {
-        mutateStock("/api/products/inventory/restore-stock", productId, quantity, ErrorCode.CHECKOUT_FAILED);
+    public void restoreStock(String productId, int quantity, Long orderId) {
+        mutateStock("/api/products/inventory/restore-stock", productId, quantity, orderId, "restore", ErrorCode.CHECKOUT_FAILED);
     }
 
-    private void mutateStock(String path, String productId, int quantity, ErrorCode errorCode) {
+    private void mutateStock(String path, String productId, int quantity, Long orderId, String action, ErrorCode errorCode) {
         try {
             restClient.patch()
                     .uri(path)
                     .header("X-Internal-Token", internalToken)
-                    .body(Map.of("productId", productId, "quantity", quantity))
+                    .body(Map.of(
+                            "productId", productId,
+                            "quantity", quantity,
+                            "orderId", String.valueOf(orderId),
+                            "requestId", mutationRequestId(orderId, action, productId)
+                    ))
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientException exception) {
             throw new ApiException(HttpStatus.CONFLICT, errorCode, "Inventory request failed.");
         }
+    }
+
+    private String mutationRequestId(Long orderId, String action, String productId) {
+        return "checkout:%s:%s:%s".formatted(orderId, action, productId);
     }
 
     public record ProductSnapshot(
