@@ -111,7 +111,7 @@ class OrderServiceTest {
         assertEquals("MILESTONE10", response.voucherCode);
         assertEquals(1, response.items.size());
         verify(walletClient).deduct(7L, 99L, new BigDecimal("225000"));
-        verify(inventoryClient).reduceStock("P1", 2);
+        verify(inventoryClient).reduceStock("P1", 2, 99L);
         verify(checkoutPreparationService).claimVoucher("MILESTONE10", 99L, new BigDecimal("250000"), 7L);
         verify(checkoutCompensationService, never()).compensate(any(), any(), any(), anyBoolean(), anyList());
     }
@@ -137,7 +137,7 @@ class OrderServiceTest {
         assertEquals(ErrorCode.WALLET_INSUFFICIENT, exception.getCode());
         verify(orderRepository, never()).save(any(Order.class));
         verify(walletClient, never()).deduct(any(), any(), any());
-        verify(inventoryClient, never()).reduceStock(any(), anyInt());
+        verify(inventoryClient, never()).reduceStock(any(), anyInt(), any(Long.class));
     }
 
     @Test

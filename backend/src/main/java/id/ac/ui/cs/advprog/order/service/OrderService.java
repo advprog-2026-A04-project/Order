@@ -84,7 +84,7 @@ public class OrderService {
             walletDeducted = true;
 
             for (OrderItem item : preparedCheckout.items()) {
-                inventoryClient.reduceStock(item.getProductId(), item.getQty());
+                inventoryClient.reduceStock(item.getProductId(), item.getQty(), order.getId());
                 reducedItems.add(item);
             }
 
