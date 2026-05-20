@@ -33,6 +33,7 @@ public class OrderService {
     private final WalletClient walletClient;
     private final CheckoutPreparationService checkoutPreparationService;
     private final CheckoutCompensationService checkoutCompensationService;
+    private final IdempotencyService idempotencyService;
 
     public OrderService(
             OrderRepository orderRepository,
@@ -41,7 +42,8 @@ public class OrderService {
             InventoryClient inventoryClient,
             WalletClient walletClient,
             CheckoutPreparationService checkoutPreparationService,
-            CheckoutCompensationService checkoutCompensationService
+            CheckoutCompensationService checkoutCompensationService,
+            IdempotencyService idempotencyService
     ) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
@@ -50,11 +52,18 @@ public class OrderService {
         this.walletClient = walletClient;
         this.checkoutPreparationService = checkoutPreparationService;
         this.checkoutCompensationService = checkoutCompensationService;
+        this.idempotencyService = idempotencyService;
     }
 
-    // ── Checkout ─────────────────────────────────────────────────────────────
-
-    public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request) {
+    public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request, String idemKey) {
+         if (idemKey != null && !idemKey.isBlank()) {
+            var existing = idempotencyService.findExistingOrderId(idemKey);
+            if (existing.isPresent()) {
+                Order order = findOrder(existing.get());
+                return toDetail(order, orderItemRepository.findByOrderId(order.getId()));
+            }
+        }
+        
         CheckoutPreparationService.PreparedCheckout prepared = checkoutPreparationService.prepare(request);
 
         WalletClient.WalletBalance balance = walletClient.getBalance(buyerId);
@@ -91,6 +100,13 @@ public class OrderService {
             order.setFailureReason(null);
             order.setUpdatedAt(Instant.now());
             orderRepository.save(order);
+ 
+            if (idemKey != null && !idemKey.isBlank()) {
+                String requestHash = IdempotencyService.hash(
+                        buyerId + "|" + request.getAddress() + "|" + prepared.subtotal());
+                idempotencyService.record(idemKey, buyerId, "checkout", requestHash, order.getId());
+            }
+ 
             return toDetail(order, prepared.items());
         } catch (ApiException ex) {
             checkoutCompensationService.compensate(order, buyerId, prepared.totalPaid(),
@@ -102,8 +118,6 @@ public class OrderService {
             throw ex;
         }
     }
-
-    // ── Queries ──────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public List<OrderListItemResponse> listMyOrders(Long buyerId) {
@@ -152,8 +166,6 @@ public class OrderService {
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
 
-    // ── Lifecycle mutations ───────────────────────────────────────────────────
-
     @Transactional
     public OrderDetailResponse updateStatus(Long orderId, Long actorId,
                                              boolean isAdmin, boolean isJastiper,
@@ -166,14 +178,12 @@ public class OrderService {
         Order order = findOrder(orderId);
 
         if (isAdmin) {
-            // admin boleh semua
         } else if (isJastiper) {
             if (order.getJastiperId() == null || !order.getJastiperId().equals(actorId)) {
                 throw new ApiException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN,
                         "You are not assigned to this order.");
             }
         } else {
-            // buyer hanya boleh confirm COMPLETED
             if (!order.getBuyerId().equals(actorId)) {
                 throw new ApiException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN,
                         "You do not have access to this order.");
@@ -217,7 +227,6 @@ public class OrderService {
         order.setStatus(OrderStatus.CANCELLED);
         order.setUpdatedAt(Instant.now());
 
-        // Refund idempotent — hanya sekali
         if (!order.isRefundDone() && current == OrderStatus.PAID) {
             walletClient.refund(actorId, order.getId(), order.getTotalPaid());
             order.setRefundDone(true);
@@ -273,8 +282,6 @@ public class OrderService {
 
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private Order findOrder(Long orderId) {
         return orderRepository.findById(orderId)
