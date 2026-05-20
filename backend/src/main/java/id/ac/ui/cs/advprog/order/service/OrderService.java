@@ -59,6 +59,13 @@ public class OrderService {
 
     public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request) {
         CheckoutPreparationService.PreparedCheckout preparedCheckout = checkoutPreparationService.prepare(request);
+        if (preparedCheckout.jastiperIds().contains(buyerId)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.SELF_PURCHASE_NOT_ALLOWED,
+                    "Jastipers cannot buy their own products."
+            );
+        }
 
         WalletClient.WalletBalance walletBalance = walletClient.getBalance(buyerId);
         if (walletBalance.balance() == null || walletBalance.balance().compareTo(preparedCheckout.totalPaid()) < 0) {

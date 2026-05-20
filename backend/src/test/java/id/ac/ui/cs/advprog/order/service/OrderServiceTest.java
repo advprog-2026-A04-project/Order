@@ -84,7 +84,8 @@ class OrderServiceTest {
                 new BigDecimal("250000"),
                 new BigDecimal("25000"),
                 new BigDecimal("225000"),
-                2001L
+                2001L,
+                List.of(2001L)
         );
 
         when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
@@ -126,7 +127,8 @@ class OrderServiceTest {
                 new BigDecimal("125000"),
                 BigDecimal.ZERO,
                 new BigDecimal("125000"),
-                2001L
+                2001L,
+                List.of(2001L)
         );
         when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
         when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("100000"), "IDR"));
@@ -141,6 +143,29 @@ class OrderServiceTest {
     }
 
     @Test
+    void checkoutShouldRejectWhenBuyerOwnsAnyProduct() {
+        CheckoutRequest request = request("P1", 1, null);
+        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
+                "Jl. Mawar No. 1",
+                null,
+                List.of(item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"))),
+                new BigDecimal("125000"),
+                BigDecimal.ZERO,
+                new BigDecimal("125000"),
+                2001L,
+                List.of(2001L, 7L)
+        );
+        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+        assertEquals(ErrorCode.SELF_PURCHASE_NOT_ALLOWED, exception.getCode());
+        verify(walletClient, never()).getBalance(any(Long.class));
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
     void checkoutShouldRejectWhenWalletBalanceIsMissing() {
         CheckoutRequest request = request("P1", 1, null);
         CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
@@ -150,7 +175,8 @@ class OrderServiceTest {
                 new BigDecimal("125000"),
                 BigDecimal.ZERO,
                 new BigDecimal("125000"),
-                2001L
+                2001L,
+                List.of(2001L)
         );
         when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
         when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, null, "IDR"));
@@ -172,7 +198,8 @@ class OrderServiceTest {
                 new BigDecimal("125000"),
                 new BigDecimal("5000"),
                 new BigDecimal("120000"),
-                2001L
+                2001L,
+                List.of(2001L)
         );
 
         when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
@@ -215,7 +242,8 @@ class OrderServiceTest {
                 new BigDecimal("125000"),
                 new BigDecimal("5000"),
                 new BigDecimal("120000"),
-                2001L
+                2001L,
+                List.of(2001L)
         );
 
         when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
@@ -252,7 +280,8 @@ class OrderServiceTest {
                 new BigDecimal("125000"),
                 BigDecimal.ZERO,
                 new BigDecimal("125000"),
-                2001L
+                2001L,
+                List.of(2001L)
         );
         when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
         when(walletClient.getBalance(7L)).thenReturn(new WalletClient.WalletBalance(7L, new BigDecimal("500000"), "IDR"));

@@ -147,6 +147,7 @@ class CheckoutPreparationServiceTest {
         assertEquals(new BigDecimal("25000"), preparedCheckout.discount());
         assertEquals(new BigDecimal("225000"), preparedCheckout.totalPaid());
         assertEquals(2001L, preparedCheckout.jastiperId());
+        assertEquals(List.of(2001L), preparedCheckout.jastiperIds());
         assertEquals(1, preparedCheckout.items().size());
     }
 
@@ -172,6 +173,7 @@ class CheckoutPreparationServiceTest {
         assertEquals(BigDecimal.ZERO, preparedCheckout.discount());
         assertEquals(new BigDecimal("125000"), preparedCheckout.totalPaid());
         assertEquals(null, preparedCheckout.jastiperId());
+        assertEquals(List.of(), preparedCheckout.jastiperIds());
     }
 
     @Test
@@ -203,6 +205,7 @@ class CheckoutPreparationServiceTest {
         assertEquals(new BigDecimal("200000"), preparedCheckout.subtotal());
         assertEquals(new BigDecimal("190000"), preparedCheckout.totalPaid());
         assertEquals(2001L, preparedCheckout.jastiperId());
+        assertEquals(List.of(2001L, 2002L), preparedCheckout.jastiperIds());
         assertEquals(2, preparedCheckout.items().size());
     }
 
