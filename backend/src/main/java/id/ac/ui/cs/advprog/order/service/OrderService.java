@@ -34,6 +34,7 @@ public class OrderService {
     private final CheckoutPreparationService checkoutPreparationService;
     private final CheckoutCompensationService checkoutCompensationService;
     private final IdempotencyService idempotencyService;
+    private final OrderAuditService auditService;
 
     public OrderService(
             OrderRepository orderRepository,
@@ -43,7 +44,8 @@ public class OrderService {
             WalletClient walletClient,
             CheckoutPreparationService checkoutPreparationService,
             CheckoutCompensationService checkoutCompensationService,
-            IdempotencyService idempotencyService
+            IdempotencyService idempotencyService,
+            OrderAuditService auditService
     ) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
@@ -53,6 +55,7 @@ public class OrderService {
         this.checkoutPreparationService = checkoutPreparationService;
         this.checkoutCompensationService = checkoutCompensationService;
         this.idempotencyService = idempotencyService;
+        this.auditService = auditService;
     }
 
     public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request, String idemKey) {
@@ -74,6 +77,8 @@ public class OrderService {
 
         Order order = createPendingOrder(buyerId, prepared);
         persistItems(order, prepared.items());
+        auditService.log(order.getId(), buyerId, "CHECKOUT_PENDING",
+                "Order created with subtotal=" + prepared.subtotal());
 
         boolean walletDeducted = false;
         List<OrderItem> reducedItems = new ArrayList<>();
@@ -81,6 +86,8 @@ public class OrderService {
         try {
             walletClient.deduct(buyerId, order.getId(), prepared.totalPaid());
             walletDeducted = true;
+            auditService.log(order.getId(), buyerId, "WALLET_DEDUCTED",
+                    "Deducted " + prepared.totalPaid() + " from buyer wallet");
 
             for (OrderItem item : prepared.items()) {
                 inventoryClient.reduceStock(item.getProductId(), item.getQty());
@@ -94,12 +101,16 @@ public class OrderService {
                     throw new ApiException(HttpStatus.CONFLICT, ErrorCode.VOUCHER_INVALID,
                             claim.message() == null ? "Voucher claim failed." : claim.message());
                 }
+                auditService.log(order.getId(), buyerId, "VOUCHER_CLAIMED",
+                        "Voucher " + prepared.voucherCode() + " claimed; discount=" + prepared.discount());
             }
 
             order.setStatus(OrderStatus.PAID);
             order.setFailureReason(null);
             order.setUpdatedAt(Instant.now());
             orderRepository.save(order);
+            auditService.log(order.getId(), buyerId, "VOUCHER_CLAIMED",
+                        "Voucher " + prepared.voucherCode() + " claimed; discount=" + prepared.discount());
  
             if (idemKey != null && !idemKey.isBlank()) {
                 String requestHash = IdempotencyService.hash(
@@ -115,6 +126,7 @@ public class OrderService {
             order.setFailureReason(ex.getMessage());
             order.setUpdatedAt(Instant.now());
             orderRepository.save(order);
+            auditService.log(order.getId(), buyerId, "CHECKOUT_FAILED", ex.getMessage());
             throw ex;
         }
     }
@@ -198,6 +210,8 @@ public class OrderService {
         order.setStatus(nextStatus);
         order.setUpdatedAt(Instant.now());
         orderRepository.save(order);
+        auditService.log(orderId, actorId, "STATUS_CHANGED",
+                prev + " -> " + nextStatus);
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
 
@@ -230,14 +244,20 @@ public class OrderService {
         if (!order.isRefundDone() && current == OrderStatus.PAID) {
             walletClient.refund(actorId, order.getId(), order.getTotalPaid());
             order.setRefundDone(true);
+            auditService.log(orderId, actorId, "WALLET_REFUNDED",
+                    "Refunded " + order.getTotalPaid() + " to buyer wallet");
 
             List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
             for (OrderItem item : items) {
                 inventoryClient.restoreStock(item.getProductId(), item.getQty());
             }
+            auditService.log(orderId, actorId, "STOCK_RESTORED",
+                    "Restored stock for " + orderItemRepository.findByOrderId(orderId).size() + " product(s)");
         }
 
         orderRepository.save(order);
+        auditService.log(orderId, actorId, "ORDER_CANCELLED",
+                "Cancelled by actor " + actorId + "; previous status=" + current);
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
 
@@ -279,6 +299,8 @@ public class OrderService {
         rating.setComment(request.getComment());
         rating.setCreatedAt(Instant.now());
         ratingRepository.save(rating);
+        auditService.log(orderId, buyerId, "RATING_SUBMITTED",
+                "product=" + request.getProductRating() + " jastiper=" + request.getJastiperRating());
 
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
