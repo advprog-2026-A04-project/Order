@@ -109,9 +109,9 @@ public class OrderService {
             order.setFailureReason(null);
             order.setUpdatedAt(Instant.now());
             orderRepository.save(order);
-            auditService.log(order.getId(), buyerId, "VOUCHER_CLAIMED",
-                        "Voucher " + prepared.voucherCode() + " claimed; discount=" + prepared.discount());
- 
+            auditService.log(order.getId(), buyerId, "CHECKOUT_COMPLETED",
+                    "Order completed and paid; totalPaid=" + prepared.totalPaid());
+
             if (idemKey != null && !idemKey.isBlank()) {
                 String requestHash = IdempotencyService.hash(
                         buyerId + "|" + request.getAddress() + "|" + prepared.subtotal());
@@ -206,7 +206,8 @@ public class OrderService {
             }
         }
 
-        validateTransition(order.getStatus(), nextStatus);
+        OrderStatus prev = order.getStatus();
+        validateTransition(prev, nextStatus);
         order.setStatus(nextStatus);
         order.setUpdatedAt(Instant.now());
         orderRepository.save(order);

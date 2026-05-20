@@ -51,7 +51,7 @@ class OrderControllerTest {
         @Test
         void shouldReturnCreatedForTitiper() throws Exception {
             OrderDetailResponse response = paidDetailResponse(5L, "225000");
-            when(orderService.checkout(any(Long.class), any())).thenReturn(response);
+            when(orderService.checkout(any(Long.class), any(), any(String.class))).thenReturn(response);
 
             mockMvc.perform(post("/orders/checkout")
                             .principal(auth("7", "ROLE_TITIPER"))
@@ -62,7 +62,7 @@ class OrderControllerTest {
                     .andExpect(jsonPath("$.data.id").value(5))
                     .andExpect(jsonPath("$.data.status").value("PAID"));
 
-            verify(orderService).checkout(eq(7L), any());
+            verify(orderService).checkout(eq(7L), any(), any(String.class));
         }
 
         @Test
@@ -106,7 +106,7 @@ class OrderControllerTest {
 
         @Test
         void shouldSurfaceServiceExceptionAsConflict() throws Exception {
-            when(orderService.checkout(any(), any()))
+            when(orderService.checkout(any(), any(), any(String.class)))
                     .thenThrow(new ApiException(HttpStatus.CONFLICT,
                             ErrorCode.WALLET_INSUFFICIENT, "Wallet balance is insufficient."));
 
