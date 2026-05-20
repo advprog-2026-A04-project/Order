@@ -30,6 +30,7 @@ public class CheckoutPreparationService {
         require(request.getAddress() != null && !request.getAddress().isBlank(), ErrorCode.VALIDATION_ERROR, "Address is required.");
 
         List<OrderItem> items = new ArrayList<>();
+        List<Long> jastiperIds = new ArrayList<>();
         BigDecimal subtotal = BigDecimal.ZERO;
         Long jastiperId = null;
 
@@ -52,8 +53,12 @@ public class CheckoutPreparationService {
             item.setLineTotal(lineTotal);
             items.add(item);
 
-            if (jastiperId == null && product.jastiperId() != null && product.jastiperId().matches("\\d+")) {
-                jastiperId = Long.valueOf(product.jastiperId());
+            if (product.jastiperId() != null && product.jastiperId().matches("\\d+")) {
+                Long productJastiperId = Long.valueOf(product.jastiperId());
+                jastiperIds.add(productJastiperId);
+                if (jastiperId == null) {
+                    jastiperId = productJastiperId;
+                }
             }
         }
 
@@ -79,7 +84,8 @@ public class CheckoutPreparationService {
                 subtotal,
                 discount,
                 totalPaid,
-                jastiperId
+                jastiperId,
+                jastiperIds
         );
     }
 
@@ -107,7 +113,8 @@ public class CheckoutPreparationService {
             BigDecimal subtotal,
             BigDecimal discount,
             BigDecimal totalPaid,
-            Long jastiperId
+            Long jastiperId,
+            List<Long> jastiperIds
     ) {
     }
 }

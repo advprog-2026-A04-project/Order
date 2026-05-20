@@ -53,9 +53,15 @@ public class OrderService {
     }
 
     // ── Checkout ─────────────────────────────────────────────────────────────
-
     public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request) {
         CheckoutPreparationService.PreparedCheckout prepared = checkoutPreparationService.prepare(request);
+        if (prepared.jastiperIds().contains(buyerId)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.SELF_PURCHASE_NOT_ALLOWED,
+                    "Jastipers cannot buy their own products."
+            );
+        }
 
         WalletClient.WalletBalance balance = walletClient.getBalance(buyerId);
         if (balance.balance() == null || balance.balance().compareTo(prepared.totalPaid()) < 0) {
@@ -74,7 +80,7 @@ public class OrderService {
             walletDeducted = true;
 
             for (OrderItem item : prepared.items()) {
-                inventoryClient.reduceStock(item.getProductId(), item.getQty());
+                inventoryClient.reduceStock(item.getProductId(), item.getQty(), order.getId());
                 reducedItems.add(item);
             }
 
@@ -224,7 +230,7 @@ public class OrderService {
 
             List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
             for (OrderItem item : items) {
-                inventoryClient.restoreStock(item.getProductId(), item.getQty());
+                inventoryClient.restoreStock(item.getProductId(), item.getQty(), order.getId());
             }
         }
 
