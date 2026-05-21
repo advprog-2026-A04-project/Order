@@ -473,8 +473,8 @@ class OrderServiceTest {
 
         ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
 
-        assertEquals(ErrorCode.BUYER_OWNS_PRODUCT, exception.getCode());
-        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
+        assertEquals(ErrorCode.SELF_PURCHASE_NOT_ALLOWED, exception.getCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
         verify(walletClient, never()).getBalance(any(Long.class));
         verify(walletClient, never()).deduct(any(Long.class), any(Long.class), any(BigDecimal.class));
         verify(inventoryClient, never()).reduceStock(any(), anyInt(), any());

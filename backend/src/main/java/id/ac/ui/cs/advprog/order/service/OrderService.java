@@ -30,6 +30,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -52,6 +53,7 @@ public class OrderService {
     private final CheckoutPreparationService checkoutPreparationService;
     private final CheckoutCompensationService checkoutCompensationService;
 
+    @Autowired
     public OrderService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
@@ -70,6 +72,27 @@ public class OrderService {
         this.walletClient = walletClient;
         this.checkoutPreparationService = checkoutPreparationService;
         this.checkoutCompensationService = checkoutCompensationService;
+    }
+
+    OrderService(
+            OrderRepository orderRepository,
+            OrderItemRepository orderItemRepository,
+            RatingRepository ratingRepository,
+            InventoryClient inventoryClient,
+            WalletClient walletClient,
+            CheckoutPreparationService checkoutPreparationService,
+            CheckoutCompensationService checkoutCompensationService
+    ) {
+        this(
+                orderRepository,
+                orderItemRepository,
+                ratingRepository,
+                null,
+                inventoryClient,
+                walletClient,
+                checkoutPreparationService,
+                checkoutCompensationService
+        );
     }
 
     public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request) {
@@ -227,10 +250,12 @@ public class OrderService {
     }
 
     private void rejectSelfCheckout(Long buyerId, CheckoutPreparationService.PreparedCheckout preparedCheckout) {
-        if (preparedCheckout.jastiperId() != null && preparedCheckout.jastiperId().equals(buyerId)) {
+        boolean ownsPrimaryProduct = preparedCheckout.jastiperId() != null && preparedCheckout.jastiperId().equals(buyerId);
+        boolean ownsAnyProduct = preparedCheckout.jastiperIds() != null && preparedCheckout.jastiperIds().contains(buyerId);
+        if (ownsPrimaryProduct || ownsAnyProduct) {
             throw new ApiException(
-                    HttpStatus.FORBIDDEN,
-                    ErrorCode.BUYER_OWNS_PRODUCT,
+                    HttpStatus.CONFLICT,
+                    ErrorCode.SELF_PURCHASE_NOT_ALLOWED,
                     "Jastiper cannot checkout their own product."
             );
         }
@@ -288,6 +313,11 @@ public class OrderService {
                 .stream()
                 .map(this::toListItem)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderListItemResponse> listActiveOrders(Long buyerId) {
+        return listMyActiveOrders(buyerId);
     }
 
     @Transactional(readOnly = true)
@@ -365,13 +395,20 @@ public class OrderService {
             );
         }
 
+        List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
         walletClient.refund(order.getBuyerId(), order.getId(), order.getTotalPaid());
+        restoreOrderStock(order, items);
         order.setStatus(OrderStatus.CANCELLED);
         order.setRefundDone(true);
         order.setFailureReason(null);
         order.setUpdatedAt(Instant.now());
 
-        return toDetail(orderRepository.save(order), orderItemRepository.findByOrderId(orderId));
+        return toDetail(orderRepository.save(order), items);
+    }
+
+    @Transactional
+    public OrderDetailResponse cancel(Long orderId, Long actorId, boolean isAdmin, boolean isJastiper) {
+        return cancelOrder(orderId, actorId, isAdmin);
     }
 
     @Transactional
@@ -405,6 +442,17 @@ public class OrderService {
         ratingRepository.save(rating);
 
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
+    }
+
+    @Transactional
+    public OrderDetailResponse rate(Long orderId, Long actorId, RatingRequest request) {
+        return submitRating(orderId, actorId, request);
+    }
+
+    private void restoreOrderStock(Order order, List<OrderItem> items) {
+        for (OrderItem item : items) {
+            inventoryClient.restoreStock(item.getProductId(), item.getQty(), order.getId());
+        }
     }
 
     private void requireJastiperOrAdminAccess(Order order, Long actorId, boolean isAdmin) {
