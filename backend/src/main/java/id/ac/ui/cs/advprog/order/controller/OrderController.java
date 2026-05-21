@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -36,11 +37,12 @@ public class OrderController {
     @PostMapping("/checkout")
     public ResponseEntity<ApiResponse<OrderDetailResponse>> checkout(
             Authentication authentication,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CheckoutRequest request
     ) {
         requireRole(authentication, "ROLE_TITIPER");
         Long userId = currentUserId(authentication);
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(service.checkout(userId, request)));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(service.checkout(userId, request, idempotencyKey)));
     }
 
     @GetMapping("/my")

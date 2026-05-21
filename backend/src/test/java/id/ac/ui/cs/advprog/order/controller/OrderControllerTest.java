@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -46,10 +47,11 @@ class OrderControllerTest {
         response.id = 5L;
         response.status = OrderStatus.PAID;
         response.totalPaid = new BigDecimal("225000");
-        when(orderService.checkout(any(Long.class), any())).thenReturn(response);
+        when(orderService.checkout(any(Long.class), any(), any())).thenReturn(response);
 
         mockMvc.perform(post("/orders/checkout")
                         .principal(authentication("7", "ROLE_TITIPER"))
+                        .header("Idempotency-Key", "retry-key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -65,7 +67,7 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.id").value(5))
                 .andExpect(jsonPath("$.data.status").value("PAID"));
 
-        verify(orderService).checkout(any(Long.class), any());
+        verify(orderService).checkout(any(Long.class), any(), eq("retry-key"));
     }
 
     @Test

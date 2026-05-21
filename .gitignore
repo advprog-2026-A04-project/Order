@@ -36,6 +36,11 @@ out/
 ### VS Code ###
 .vscode/
 
+gha-creds-*.json
+key.json
+sa-key.json
+service-account*.json
+
 backend/data/
 backend/*.mv.db
 backend/*.trace.db

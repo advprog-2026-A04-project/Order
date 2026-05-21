@@ -5,7 +5,10 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "idempotency_records", uniqueConstraints = {
-        @UniqueConstraint(name = "uk_idem_key", columnNames = {"idemKey"})
+        @UniqueConstraint(
+                name = "uk_idem_buyer_endpoint_key",
+                columnNames = {"buyerId", "endpoint", "idemKey"}
+        )
 })
 public class IdempotencyRecord {
 

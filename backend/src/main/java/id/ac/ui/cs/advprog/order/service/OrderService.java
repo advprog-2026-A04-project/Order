@@ -6,26 +6,38 @@ import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
 import id.ac.ui.cs.advprog.order.dto.OrderDetailResponse;
 import id.ac.ui.cs.advprog.order.dto.OrderListItemResponse;
 import id.ac.ui.cs.advprog.order.dto.RatingRequest;
+import id.ac.ui.cs.advprog.order.entity.IdempotencyRecord;
 import id.ac.ui.cs.advprog.order.entity.Order;
 import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
 import id.ac.ui.cs.advprog.order.entity.Rating;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
+import id.ac.ui.cs.advprog.order.repository.IdempotencyRecordRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderItemRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderRepository;
 import id.ac.ui.cs.advprog.order.repository.RatingRepository;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class OrderService {
+    private static final String CHECKOUT_ENDPOINT = "orders.checkout";
     private static final EnumSet<OrderStatus> ACTIVE_STATUSES =
             EnumSet.of(OrderStatus.PAID, OrderStatus.PURCHASED, OrderStatus.SHIPPED);
     private static final EnumSet<OrderStatus> CANCELLABLE_STATUSES =
@@ -34,6 +46,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final RatingRepository ratingRepository;
+    private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final InventoryClient inventoryClient;
     private final WalletClient walletClient;
     private final CheckoutPreparationService checkoutPreparationService;
@@ -43,6 +56,7 @@ public class OrderService {
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
             RatingRepository ratingRepository,
+            IdempotencyRecordRepository idempotencyRecordRepository,
             InventoryClient inventoryClient,
             WalletClient walletClient,
             CheckoutPreparationService checkoutPreparationService,
@@ -51,6 +65,7 @@ public class OrderService {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.ratingRepository = ratingRepository;
+        this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.inventoryClient = inventoryClient;
         this.walletClient = walletClient;
         this.checkoutPreparationService = checkoutPreparationService;
@@ -58,12 +73,31 @@ public class OrderService {
     }
 
     public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request) {
+        return checkout(buyerId, request, null);
+    }
+
+    public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request, String idempotencyKey) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        String requestHash = normalizedKey == null ? null : checkoutRequestHash(request);
+
+        if (normalizedKey != null) {
+            Optional<IdempotencyRecord> existingRecord = idempotencyRecordRepository
+                    .findByBuyerIdAndEndpointAndIdemKey(buyerId, CHECKOUT_ENDPOINT, normalizedKey);
+            if (existingRecord.isPresent()) {
+                return resolveExistingIdempotencyRecord(buyerId, existingRecord.get(), requestHash);
+            }
+        }
+
         CheckoutPreparationService.PreparedCheckout preparedCheckout = checkoutPreparationService.prepare(request);
 
         WalletClient.WalletBalance walletBalance = walletClient.getBalance(buyerId);
         if (walletBalance.balance() == null || walletBalance.balance().compareTo(preparedCheckout.totalPaid()) < 0) {
             throw new ApiException(HttpStatus.CONFLICT, ErrorCode.WALLET_INSUFFICIENT, "Wallet balance is insufficient.");
         }
+
+        IdempotencyRecord idempotencyRecord = normalizedKey == null
+                ? null
+                : createIdempotencyRecord(buyerId, normalizedKey, requestHash);
 
         Order order = createPendingOrder(
                 buyerId,
@@ -75,6 +109,7 @@ public class OrderService {
                 preparedCheckout.voucherCode()
         );
         persistItems(order, preparedCheckout.items());
+        bindOrderToIdempotencyRecord(idempotencyRecord, order.getId());
 
         boolean walletDeducted = false;
         List<OrderItem> reducedItems = new ArrayList<>();
@@ -113,6 +148,118 @@ public class OrderService {
             order.setUpdatedAt(Instant.now());
             orderRepository.save(order);
             throw exception;
+        }
+    }
+
+    private IdempotencyRecord createIdempotencyRecord(Long buyerId, String idempotencyKey, String requestHash) {
+        IdempotencyRecord record = new IdempotencyRecord();
+        record.setBuyerId(buyerId);
+        record.setEndpoint(CHECKOUT_ENDPOINT);
+        record.setIdemKey(idempotencyKey);
+        record.setRequestHash(requestHash);
+        record.setCreatedAt(Instant.now());
+
+        try {
+            return idempotencyRecordRepository.saveAndFlush(record);
+        } catch (DataIntegrityViolationException exception) {
+            idempotencyRecordRepository
+                    .findByBuyerIdAndEndpointAndIdemKey(buyerId, CHECKOUT_ENDPOINT, idempotencyKey)
+                    .ifPresent(existingRecord -> rejectConcurrentDuplicate(existingRecord, requestHash));
+            throw exception;
+        }
+    }
+
+    private void rejectConcurrentDuplicate(IdempotencyRecord record, String requestHash) {
+        if (!Objects.equals(record.getRequestHash(), requestHash)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.IDEMPOTENCY_CONFLICT,
+                    "Idempotency key was already used for a different checkout request."
+            );
+        }
+        throw new ApiException(
+                HttpStatus.CONFLICT,
+                ErrorCode.CHECKOUT_IN_PROGRESS,
+                "Checkout is already in progress for this idempotency key."
+        );
+    }
+
+    private OrderDetailResponse resolveExistingIdempotencyRecord(
+            Long buyerId,
+            IdempotencyRecord record,
+            String requestHash
+    ) {
+        if (!Objects.equals(record.getRequestHash(), requestHash)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.IDEMPOTENCY_CONFLICT,
+                    "Idempotency key was already used for a different checkout request."
+            );
+        }
+        if (record.getOrderId() == null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.CHECKOUT_IN_PROGRESS,
+                    "Checkout is already in progress for this idempotency key."
+            );
+        }
+        Order order = requireOrder(record.getOrderId());
+        if (order.getStatus() == OrderStatus.PENDING) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.CHECKOUT_IN_PROGRESS,
+                    "Checkout is already in progress for this idempotency key."
+            );
+        }
+        if (!order.getBuyerId().equals(buyerId)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, "You do not have access to this order.");
+        }
+        return toDetail(order, orderItemRepository.findByOrderId(record.getOrderId()));
+    }
+
+    private void bindOrderToIdempotencyRecord(IdempotencyRecord record, Long orderId) {
+        if (record == null) {
+            return;
+        }
+        record.setOrderId(orderId);
+        idempotencyRecordRepository.save(record);
+    }
+
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        return idempotencyKey.trim();
+    }
+
+    private String checkoutRequestHash(CheckoutRequest request) {
+        String address = request == null ? "" : normalizeNullable(request.getAddress());
+        String voucherCode = request == null ? "" : normalizeNullable(request.getVoucherCode()).toUpperCase(Locale.ROOT);
+        String items = request == null || request.getItems() == null
+                ? ""
+                : request.getItems().stream()
+                .map(item -> "%s:%d".formatted(normalizeNullable(item.getProductId()), item.getQty()))
+                .sorted(Comparator.naturalOrder())
+                .collect(Collectors.joining("|"));
+
+        return sha256("address=%s;voucher=%s;items=%s".formatted(address, voucherCode, items));
+    }
+
+    private String normalizeNullable(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(hash.length * 2);
+            for (byte hashByte : hash) {
+                builder.append(String.format("%02x", hashByte));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 digest is unavailable.", exception);
         }
     }
 
