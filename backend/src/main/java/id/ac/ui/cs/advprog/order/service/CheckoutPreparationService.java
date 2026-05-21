@@ -116,5 +116,25 @@ public class CheckoutPreparationService {
             Long jastiperId,
             List<Long> jastiperIds
     ) {
+        public PreparedCheckout(
+                String shippingAddress,
+                String voucherCode,
+                List<OrderItem> items,
+                BigDecimal subtotal,
+                BigDecimal discount,
+                BigDecimal totalPaid,
+                Long jastiperId
+        ) {
+            this(
+                    shippingAddress,
+                    voucherCode,
+                    items,
+                    subtotal,
+                    discount,
+                    totalPaid,
+                    jastiperId,
+                    jastiperId == null ? List.of() : List.of(jastiperId)
+            );
+        }
     }
 }

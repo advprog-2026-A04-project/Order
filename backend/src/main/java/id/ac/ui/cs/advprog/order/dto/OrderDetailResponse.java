@@ -1,6 +1,7 @@
 package id.ac.ui.cs.advprog.order.dto;
 
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -16,11 +17,11 @@ public class OrderDetailResponse {
     public BigDecimal totalPaid;
     public String voucherCode;
     public String failureReason;
-    public boolean refundDone;
     public Instant createdAt;
     public Instant updatedAt;
+    public boolean refundDone;
+    public RatingSummary rating;
     public List<Item> items;
-    public RatingDetail rating;
 
     public static class Item {
         public String productId;
@@ -29,8 +30,7 @@ public class OrderDetailResponse {
         public int qty;
         public BigDecimal lineTotal;
 
-        public Item(String productId, String productNameSnapshot,
-                    BigDecimal unitPriceSnapshot, int qty, BigDecimal lineTotal) {
+        public Item(String productId, String productNameSnapshot, BigDecimal unitPriceSnapshot, int qty, BigDecimal lineTotal) {
             this.productId = productId;
             this.productNameSnapshot = productNameSnapshot;
             this.unitPriceSnapshot = unitPriceSnapshot;
@@ -39,15 +39,17 @@ public class OrderDetailResponse {
         }
     }
 
-    public static class RatingDetail {
+    public static class RatingSummary {
         public int productRating;
         public int jastiperRating;
         public String comment;
+        public Instant createdAt;
 
-        public RatingDetail(int productRating, int jastiperRating, String comment) {
+        public RatingSummary(int productRating, int jastiperRating, String comment, Instant createdAt) {
             this.productRating = productRating;
             this.jastiperRating = jastiperRating;
             this.comment = comment;
+            this.createdAt = createdAt;
         }
     }
 }
