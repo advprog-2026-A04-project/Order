@@ -225,7 +225,7 @@ public class OrderService {
 
         // Refund idempotent — hanya sekali
         if (!order.isRefundDone() && current == OrderStatus.PAID) {
-            walletClient.refund(actorId, order.getId(), order.getTotalPaid());
+            walletClient.refund(order.getBuyerId(), order.getId(), order.getTotalPaid());
             order.setRefundDone(true);
 
             List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
