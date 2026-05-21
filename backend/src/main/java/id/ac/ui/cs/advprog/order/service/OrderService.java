@@ -11,6 +11,7 @@ import id.ac.ui.cs.advprog.order.entity.Order;
 import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
 import id.ac.ui.cs.advprog.order.entity.Rating;
+import id.ac.ui.cs.advprog.order.integration.AuthProfileClient;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
 import id.ac.ui.cs.advprog.order.repository.IdempotencyRecordRepository;
@@ -50,6 +51,7 @@ public class OrderService {
     private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final InventoryClient inventoryClient;
     private final WalletClient walletClient;
+    private final AuthProfileClient authProfileClient;
     private final CheckoutPreparationService checkoutPreparationService;
     private final CheckoutCompensationService checkoutCompensationService;
 
@@ -61,6 +63,7 @@ public class OrderService {
             IdempotencyRecordRepository idempotencyRecordRepository,
             InventoryClient inventoryClient,
             WalletClient walletClient,
+            AuthProfileClient authProfileClient,
             CheckoutPreparationService checkoutPreparationService,
             CheckoutCompensationService checkoutCompensationService
     ) {
@@ -70,6 +73,7 @@ public class OrderService {
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.inventoryClient = inventoryClient;
         this.walletClient = walletClient;
+        this.authProfileClient = authProfileClient;
         this.checkoutPreparationService = checkoutPreparationService;
         this.checkoutCompensationService = checkoutCompensationService;
     }
@@ -369,7 +373,12 @@ public class OrderService {
 
         order.setStatus(nextStatus);
         order.setUpdatedAt(Instant.now());
-        return toDetail(orderRepository.save(order), orderItemRepository.findByOrderId(orderId));
+        Order saved = orderRepository.save(order);
+        List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
+        if (nextStatus == OrderStatus.COMPLETED) {
+            publishCompletedOrder(saved, items);
+        }
+        return toDetail(saved, items);
     }
 
     @Transactional
@@ -440,6 +449,7 @@ public class OrderService {
         rating.setComment(normalizeComment(request.getComment()));
         rating.setCreatedAt(Instant.now());
         ratingRepository.save(rating);
+        publishRating(order, request);
 
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
@@ -452,6 +462,20 @@ public class OrderService {
     private void restoreOrderStock(Order order, List<OrderItem> items) {
         for (OrderItem item : items) {
             inventoryClient.restoreStock(item.getProductId(), item.getQty(), order.getId());
+        }
+    }
+
+    private void publishCompletedOrder(Order order, List<OrderItem> items) {
+        authProfileClient.recordJastiperCompletedOrder(order.getJastiperId());
+        for (OrderItem item : items) {
+            inventoryClient.recordCompletedOrder(item.getProductId());
+        }
+    }
+
+    private void publishRating(Order order, RatingRequest request) {
+        authProfileClient.recordJastiperRating(order.getJastiperId(), request.getJastiperRating());
+        for (OrderItem item : orderItemRepository.findByOrderId(order.getId())) {
+            inventoryClient.recordProductRating(item.getProductId(), request.getProductRating());
         }
     }
 

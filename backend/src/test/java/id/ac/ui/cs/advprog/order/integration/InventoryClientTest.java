@@ -126,6 +126,30 @@ class InventoryClientTest {
         assertTrue(body.contains("\"requestId\":\"checkout:77:restore:P1\""));
     }
 
+    @Test
+    void recordCompletedOrderShouldCallInternalEndpoint() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(200));
+        InventoryClient client = new InventoryClient(server.url("/").toString(), "secret");
+
+        client.recordCompletedOrder("P1");
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/api/products/inventory/P1/completed-order", request.getPath());
+        assertEquals("secret", request.getHeader("X-Internal-Token"));
+    }
+
+    @Test
+    void recordProductRatingShouldSendRatingBody() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(200));
+        InventoryClient client = new InventoryClient(server.url("/").toString(), "secret");
+
+        client.recordProductRating("P1", 5);
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/api/products/inventory/P1/rating", request.getPath());
+        assertTrue(request.getBody().readUtf8().contains("\"rating\":5"));
+    }
+
     private static MockResponse json(String body) {
         return new MockResponse()
                 .setHeader("Content-Type", "application/json")
