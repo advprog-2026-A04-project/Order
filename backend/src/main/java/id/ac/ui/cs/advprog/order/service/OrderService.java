@@ -89,6 +89,7 @@ public class OrderService {
         }
 
         CheckoutPreparationService.PreparedCheckout preparedCheckout = checkoutPreparationService.prepare(request);
+        rejectSelfCheckout(buyerId, preparedCheckout);
 
         WalletClient.WalletBalance walletBalance = walletClient.getBalance(buyerId);
         if (walletBalance.balance() == null || walletBalance.balance().compareTo(preparedCheckout.totalPaid()) < 0) {
@@ -223,6 +224,16 @@ public class OrderService {
         }
         record.setOrderId(orderId);
         idempotencyRecordRepository.save(record);
+    }
+
+    private void rejectSelfCheckout(Long buyerId, CheckoutPreparationService.PreparedCheckout preparedCheckout) {
+        if (preparedCheckout.jastiperId() != null && preparedCheckout.jastiperId().equals(buyerId)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    ErrorCode.BUYER_OWNS_PRODUCT,
+                    "Jastiper cannot checkout their own product."
+            );
+        }
     }
 
     private String normalizeIdempotencyKey(String idempotencyKey) {

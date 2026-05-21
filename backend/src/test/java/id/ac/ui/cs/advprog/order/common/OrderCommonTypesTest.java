@@ -39,7 +39,9 @@ class OrderCommonTypesTest {
     @Test
     void roleShouldNormalizeIncomingHeaders() {
         assertEquals(Role.TITIPER, Role.fromHeader(null));
+        assertEquals(Role.TITIPER, Role.fromHeader("   "));
         assertEquals(Role.TITIPER, Role.fromHeader("buyer"));
+        assertEquals(Role.JASTIPER, Role.fromHeader("jastiper"));
         assertEquals(Role.ADMIN, Role.fromHeader(" admin "));
     }
 }

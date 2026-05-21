@@ -457,6 +457,30 @@ class OrderServiceTest {
     }
 
     @Test
+    void checkoutShouldRejectBuyerBuyingOwnJastiperProduct() {
+        CheckoutRequest request = request("P1", 1, null);
+        OrderItem orderItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
+        CheckoutPreparationService.PreparedCheckout preparedCheckout = new CheckoutPreparationService.PreparedCheckout(
+                "Jl. Mawar No. 1",
+                null,
+                List.of(orderItem),
+                new BigDecimal("125000"),
+                BigDecimal.ZERO,
+                new BigDecimal("125000"),
+                7L
+        );
+        when(checkoutPreparationService.prepare(request)).thenReturn(preparedCheckout);
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.checkout(7L, request));
+
+        assertEquals(ErrorCode.BUYER_OWNS_PRODUCT, exception.getCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
+        verify(walletClient, never()).getBalance(any(Long.class));
+        verify(walletClient, never()).deduct(any(Long.class), any(Long.class), any(BigDecimal.class));
+        verify(inventoryClient, never()).reduceStock(any(), anyInt(), any());
+    }
+
+    @Test
     void listMyOrdersShouldMapRepositoryResults() {
         Order order = new Order();
         ReflectionTestUtils.setField(order, "id", 3L);
