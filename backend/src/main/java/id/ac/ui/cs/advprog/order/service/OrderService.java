@@ -94,6 +94,7 @@ public class OrderService {
                 null,
                 inventoryClient,
                 walletClient,
+                null,
                 checkoutPreparationService,
                 checkoutCompensationService
         );
@@ -466,14 +467,18 @@ public class OrderService {
     }
 
     private void publishCompletedOrder(Order order, List<OrderItem> items) {
-        authProfileClient.recordJastiperCompletedOrder(order.getJastiperId());
+        if (authProfileClient != null) {
+            authProfileClient.recordJastiperCompletedOrder(order.getJastiperId());
+        }
         for (OrderItem item : items) {
             inventoryClient.recordCompletedOrder(item.getProductId());
         }
     }
 
     private void publishRating(Order order, RatingRequest request) {
-        authProfileClient.recordJastiperRating(order.getJastiperId(), request.getJastiperRating());
+        if (authProfileClient != null) {
+            authProfileClient.recordJastiperRating(order.getJastiperId(), request.getJastiperRating());
+        }
         for (OrderItem item : orderItemRepository.findByOrderId(order.getId())) {
             inventoryClient.recordProductRating(item.getProductId(), request.getProductRating());
         }
