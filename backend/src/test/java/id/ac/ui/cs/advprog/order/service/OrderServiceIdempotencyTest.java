@@ -42,10 +42,9 @@ class OrderServiceIdempotencyTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         orderService = new OrderService(
-                orderRepository, orderItemRepository, ratingRepository,
-                inventoryClient, walletClient,
-                checkoutPreparationService, checkoutCompensationService,
-                idempotencyService, auditService);
+            orderRepository, orderItemRepository, ratingRepository, 
+            inventoryClient, walletClient, checkoutPreparationService, 
+            checkoutCompensationService);
     }
 
     @Test
@@ -89,8 +88,6 @@ class OrderServiceIdempotencyTest {
         verify(idempotencyService, never()).findExistingOrderId(any());
     }
 
-    // ── helpers ──
-
     private Order buildOrder(Long id, OrderStatus status) {
         Order o = new Order();
         o.setBuyerId(1L);
@@ -101,7 +98,6 @@ class OrderServiceIdempotencyTest {
         o.setTotalPaid(BigDecimal.valueOf(100000));
         o.setCreatedAt(Instant.now());
         o.setUpdatedAt(Instant.now());
-        // Use reflection to set the private id
         try {
             var field = Order.class.getDeclaredField("id");
             field.setAccessible(true);

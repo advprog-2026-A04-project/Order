@@ -19,14 +19,15 @@ public class CheckoutCompensationService {
         this.inventoryClient = inventoryClient;
     }
 
-    public void compensate(Order order, Long buyerId, BigDecimal totalPaid, boolean walletDeducted, List<OrderItem> reducedItems) {
+    public void compensate(Order order, Long buyerId, BigDecimal totalPaid,
+                           boolean walletDeducted, List<OrderItem> reducedItems) {
         if (walletDeducted) {
             walletClient.refund(buyerId, order.getId(), totalPaid);
             order.setRefundDone(true);
         }
 
         for (OrderItem item : reducedItems) {
-            inventoryClient.restoreStock(item.getProductId(), item.getQty());
+            inventoryClient.restoreStock(item.getProductId(), item.getQty(), order.getId());
         }
     }
 }

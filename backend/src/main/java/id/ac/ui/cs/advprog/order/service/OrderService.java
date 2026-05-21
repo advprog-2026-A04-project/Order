@@ -70,7 +70,6 @@ public class OrderService {
         this.auditService = auditService;
     }
 
-    // Package-private for testing without IdempotencyRecordRepository
     OrderService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
@@ -85,8 +84,6 @@ public class OrderService {
                 checkoutPreparationService, checkoutCompensationService,
                 new OrderAuditService(null));
     }
-
-    // ── Checkout ─────────────────────────────────────────────────────────────
 
     public OrderDetailResponse checkout(Long buyerId, CheckoutRequest request) {
         return checkout(buyerId, request, null);
@@ -170,8 +167,6 @@ public class OrderService {
         }
     }
 
-    // ── Queries ──────────────────────────────────────────────────────────────
-
     @Transactional(readOnly = true)
     public List<OrderListItemResponse> listMyOrders(Long buyerId) {
         return orderRepository.findByBuyerIdOrderByCreatedAtDesc(buyerId)
@@ -223,8 +218,6 @@ public class OrderService {
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
 
-    // ── Lifecycle mutations ───────────────────────────────────────────────────
-
     @Transactional
     public OrderDetailResponse updateStatus(Long orderId, Long actorId,
                                              boolean isAdmin, boolean isJastiper,
@@ -263,7 +256,6 @@ public class OrderService {
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
 
-    // Overload for backup controller compatibility (no isJastiper param)
     @Transactional
     public OrderDetailResponse updateStatus(Long orderId, Long actorId,
                                              boolean isAdmin, OrderStatus nextStatus) {
@@ -316,7 +308,6 @@ public class OrderService {
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
 
-    // Overload for backup controller compatibility (cancelOrder without isJastiper)
     @Transactional
     public OrderDetailResponse cancelOrder(Long orderId, Long actorId, boolean isAdmin) {
         return cancel(orderId, actorId, isAdmin, !isAdmin);
@@ -371,8 +362,6 @@ public class OrderService {
         return toDetail(order, orderItemRepository.findByOrderId(orderId));
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
-
     Order requireOrder(Long orderId) {
         return orderRepository.findById(orderId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
@@ -381,8 +370,7 @@ public class OrderService {
 
     private void rejectSelfCheckout(Long buyerId, CheckoutPreparationService.PreparedCheckout prepared) {
         boolean ownsPrimary = prepared.jastiperId() != null && prepared.jastiperId().equals(buyerId);
-        boolean ownsAny = prepared.jastiperIds() != null && prepared.jastiperIds().contains(buyerId);
-        if (ownsPrimary || ownsAny) {
+        if (ownsPrimary) {
             throw new ApiException(HttpStatus.CONFLICT, ErrorCode.SELF_PURCHASE_NOT_ALLOWED,
                     "Jastiper cannot checkout their own product.");
         }

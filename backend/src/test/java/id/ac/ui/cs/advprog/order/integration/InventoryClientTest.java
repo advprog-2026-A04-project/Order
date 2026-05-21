@@ -77,7 +77,7 @@ class InventoryClientTest {
         server.enqueue(new MockResponse().setResponseCode(409));
         InventoryClient client = new InventoryClient(server.url("/").toString(), "secret");
 
-        ApiException exception = assertThrows(ApiException.class, () -> client.reduceStock("P1", 2));
+        ApiException exception = assertThrows(ApiException.class, () -> client.reduceStock("P1", 2, null));
 
         assertEquals(HttpStatus.CONFLICT, exception.getStatus());
         assertEquals(ErrorCode.INSUFFICIENT_STOCK, exception.getCode());
@@ -88,7 +88,7 @@ class InventoryClientTest {
         server.enqueue(new MockResponse().setResponseCode(409));
         InventoryClient client = new InventoryClient(server.url("/").toString(), "secret");
 
-        ApiException exception = assertThrows(ApiException.class, () -> client.restoreStock("P1", 2));
+        ApiException exception = assertThrows(ApiException.class, () -> client.restoreStock("P1", 2, null));
 
         assertEquals(HttpStatus.CONFLICT, exception.getStatus());
         assertEquals(ErrorCode.CHECKOUT_FAILED, exception.getCode());
