@@ -12,6 +12,7 @@ import id.ac.ui.cs.advprog.order.entity.Order;
 import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
 import id.ac.ui.cs.advprog.order.entity.Rating;
+import id.ac.ui.cs.advprog.order.integration.AuthProfileClient;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
 import id.ac.ui.cs.advprog.order.integration.VoucherClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
@@ -51,6 +52,7 @@ class OrderServiceTest {
     private IdempotencyRecordRepository idempotencyRecordRepository;
     private InventoryClient inventoryClient;
     private WalletClient walletClient;
+    private AuthProfileClient authProfileClient;
     private CheckoutPreparationService checkoutPreparationService;
     private CheckoutCompensationService checkoutCompensationService;
     private OrderService service;
@@ -63,6 +65,7 @@ class OrderServiceTest {
         idempotencyRecordRepository = mock(IdempotencyRecordRepository.class);
         inventoryClient = mock(InventoryClient.class);
         walletClient = mock(WalletClient.class);
+        authProfileClient = mock(AuthProfileClient.class);
         checkoutPreparationService = mock(CheckoutPreparationService.class);
         checkoutCompensationService = mock(CheckoutCompensationService.class);
         service = new OrderService(
@@ -72,6 +75,7 @@ class OrderServiceTest {
                 idempotencyRecordRepository,
                 inventoryClient,
                 walletClient,
+                authProfileClient,
                 checkoutPreparationService,
                 checkoutCompensationService
         );
@@ -530,6 +534,18 @@ class OrderServiceTest {
     }
 
     @Test
+    void listJastiperOrdersShouldUseAssignedJastiperViewForNonAdmins() {
+        Order order = buildLifecycleOrder(41L, OrderStatus.PURCHASED);
+        when(orderRepository.findByJastiperIdOrderByCreatedAtDesc(2001L)).thenReturn(List.of(order));
+
+        List<OrderListItemResponse> responses = service.listJastiperOrders(2001L, false);
+
+        assertEquals(1, responses.size());
+        assertEquals(41L, responses.getFirst().id);
+        verify(orderRepository, never()).findAllByOrderByUpdatedAtDesc();
+    }
+
+    @Test
     void getDetailShouldRejectForbiddenAccessForDifferentBuyer() {
         Order order = new Order();
         ReflectionTestUtils.setField(order, "id", 8L);
@@ -640,6 +656,24 @@ class OrderServiceTest {
 
         assertEquals(OrderStatus.SHIPPED, shippedResponse.status);
         assertEquals(OrderStatus.COMPLETED, completedResponse.status);
+        verify(authProfileClient).recordJastiperCompletedOrder(2001L);
+    }
+
+    @Test
+    void updateStatusShouldPublishCompletedOrderToProfileAndInventory() {
+        Order shipped = buildLifecycleOrder(38L, OrderStatus.SHIPPED);
+        OrderItem firstItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
+        OrderItem secondItem = item("P2", "Bag", 2, new BigDecimal("50000"), new BigDecimal("100000"));
+        when(orderRepository.findById(38L)).thenReturn(Optional.of(shipped));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderItemRepository.findByOrderId(38L)).thenReturn(List.of(firstItem, secondItem));
+
+        OrderDetailResponse response = service.updateStatus(38L, 2001L, false, OrderStatus.COMPLETED);
+
+        assertEquals(OrderStatus.COMPLETED, response.status);
+        verify(authProfileClient).recordJastiperCompletedOrder(2001L);
+        verify(inventoryClient).recordCompletedOrder("P1");
+        verify(inventoryClient).recordCompletedOrder("P2");
     }
 
     @Test
@@ -751,6 +785,23 @@ class OrderServiceTest {
 
         assertEquals(OrderStatus.COMPLETED, response.status);
         verify(ratingRepository).save(any(Rating.class));
+        verify(authProfileClient).recordJastiperRating(2001L, 4);
+    }
+
+    @Test
+    void submitRatingShouldPublishProductAndJastiperRatings() {
+        Order order = buildLifecycleOrder(39L, OrderStatus.COMPLETED);
+        OrderItem firstItem = item("P1", "Shoes", 1, new BigDecimal("125000"), new BigDecimal("125000"));
+        OrderItem secondItem = item("P2", "Bag", 2, new BigDecimal("50000"), new BigDecimal("100000"));
+        when(orderRepository.findById(39L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findByOrderId(39L)).thenReturn(List.of(firstItem, secondItem));
+        when(ratingRepository.save(any(Rating.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.submitRating(39L, 7L, ratingRequest("fast delivery"));
+
+        verify(authProfileClient).recordJastiperRating(2001L, 4);
+        verify(inventoryClient).recordProductRating("P1", 5);
+        verify(inventoryClient).recordProductRating("P2", 5);
     }
 
     @Test

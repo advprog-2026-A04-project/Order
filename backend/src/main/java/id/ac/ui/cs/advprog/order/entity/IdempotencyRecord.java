@@ -16,7 +16,7 @@ public class IdempotencyRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 80)
+    @Column(nullable = false, length = 160)
     private String idemKey;
 
     @Column(nullable = false)
