@@ -55,11 +55,21 @@ jobs:
           VOUCHER_SERVICE_BASE_URL: ${{ secrets.VOUCHER_SERVICE_BASE_URL }}
         run: |
           trap 'rm -f deploy.env' EXIT
+          db_url="${DB_URL:-}"
+          if [[ "$db_url" == \?jdbc:* ]]; then
+            db_url="${db_url#?}"
+          fi
+
+          db_driver="$DB_DRIVER"
+          if [[ "$db_url" == *"jdbc:h2:"* ]]; then
+            db_driver="org.h2.Driver"
+          fi
+
           {
             printf 'APP_CORS_ALLOWED_ORIGINS=%s\n' "$APP_CORS_ALLOWED_ORIGINS"
             printf 'CLOUD_SQL_INSTANCE_CONNECTION_NAME=%s\n' "$CLOUD_SQL_INSTANCE_CONNECTION_NAME"
-            printf 'DB_URL=%s\n' "$DB_URL"
-            printf 'DB_DRIVER=%s\n' "$DB_DRIVER"
+            printf 'DB_URL=%s\n' "$db_url"
+            printf 'DB_DRIVER=%s\n' "$db_driver"
             printf 'DB_USERNAME=%s\n' "$DB_USERNAME"
             printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
             printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
@@ -71,7 +81,11 @@ jobs:
 
           cloud_sql_args=()
           if [ -n "${CLOUD_SQL_INSTANCE_CONNECTION_NAME:-}" ]; then
-            cloud_sql_args+=(--add-cloudsql-instances "$CLOUD_SQL_INSTANCE_CONNECTION_NAME")
+            if [[ "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z0-9-]+:[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]]; then
+              cloud_sql_args+=(--add-cloudsql-instances "$CLOUD_SQL_INSTANCE_CONNECTION_NAME")
+            else
+              echo "::warning::Skipping invalid CLOUD_SQL_INSTANCE_CONNECTION_NAME value."
+            fi
           fi
 
           project_id="${GOOGLE_CLOUD_PROJECT:-${CLOUDSDK_CORE_PROJECT}}"
