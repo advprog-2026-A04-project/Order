@@ -19,8 +19,8 @@ public class InventoryClient {
             @Value("${services.inventory.base-url}") String baseUrl,
             @Value("${app.internal-token}") String internalToken
     ) {
-        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
-        this.internalToken = internalToken;
+        this.restClient = RestClient.builder().baseUrl(IntegrationConfigValues.sanitize(baseUrl)).build();
+        this.internalToken = IntegrationConfigValues.sanitize(internalToken);
     }
 
     public ProductSnapshot getProduct(String productId) {

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,26 @@ class VoucherClientTest {
 
         assertEquals("MILESTONE10", validation.code());
         assertEquals(new BigDecimal("25000.00"), validation.discountAmount());
+    }
+
+    @Test
+    void validateShouldStripBomFromBaseUrlAndInternalToken() throws Exception {
+        server.enqueue(json("""
+                {
+                  "valid": true,
+                  "code": "MILESTONE10",
+                  "orderAmount": 125000.00,
+                  "discountAmount": 25000.00,
+                  "message": "ok"
+                }
+                """));
+        VoucherClient client = new VoucherClient("\uFEFF" + server.url("/"), "\uFEFFsecret");
+
+        client.validate("MILESTONE10", new BigDecimal("125000"));
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/vouchers/validate", request.getPath());
+        assertEquals("secret", request.getHeader("X-Internal-Token"));
     }
 
     @Test

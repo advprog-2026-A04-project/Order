@@ -51,6 +51,26 @@ class InventoryClientTest {
     }
 
     @Test
+    void getProductShouldStripBomFromBaseUrlAndInternalToken() throws Exception {
+        server.enqueue(json("""
+                {
+                  "id": "P1",
+                  "name": "Shoes",
+                  "price": 125000.00,
+                  "stock": 3,
+                  "jastiperId": "2001"
+                }
+                """));
+        InventoryClient client = new InventoryClient("\uFEFF" + server.url("/"), "\uFEFFsecret");
+
+        client.getProduct("P1");
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/api/products/inventory/P1", request.getPath());
+        assertEquals("secret", request.getHeader("X-Internal-Token"));
+    }
+
+    @Test
     void getProductShouldMapMissingProductToApiException() {
         server.enqueue(new MockResponse().setResponseCode(404));
         InventoryClient client = new InventoryClient(server.url("/").toString(), "secret");

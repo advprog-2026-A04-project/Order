@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,24 @@ class WalletClientTest {
 
         assertEquals(7L, balance.userId());
         assertEquals(new BigDecimal("450000.00"), balance.balance());
+    }
+
+    @Test
+    void getBalanceShouldStripBomFromBaseUrlAndInternalToken() throws Exception {
+        server.enqueue(json("""
+                {
+                  "userId": 7,
+                  "balance": 450000.00,
+                  "currency": "IDR"
+                }
+                """));
+        WalletClient client = new WalletClient("\uFEFF" + server.url("/"), "\uFEFFsecret");
+
+        client.getBalance(7L);
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("/wallet/balance", request.getPath());
+        assertEquals("secret", request.getHeader("X-Internal-Token"));
     }
 
     @Test

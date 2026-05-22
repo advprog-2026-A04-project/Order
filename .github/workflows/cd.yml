@@ -57,6 +57,20 @@ jobs:
           trap 'rm -f deploy.env' EXIT
           default_db_url="jdbc:h2:mem:order;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
 
+          clean_env_value() {
+            printf '%s' "${1:-}" | sed $'s/^\xEF\xBB\xBF//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+          }
+
+          APP_CORS_ALLOWED_ORIGINS="$(clean_env_value "$APP_CORS_ALLOWED_ORIGINS")"
+          CLOUD_SQL_INSTANCE_CONNECTION_NAME="$(clean_env_value "$CLOUD_SQL_INSTANCE_CONNECTION_NAME")"
+          DB_URL="$(clean_env_value "$DB_URL")"
+          DB_USERNAME="$(clean_env_value "$DB_USERNAME")"
+          DB_PASSWORD="$(clean_env_value "$DB_PASSWORD")"
+          INTERNAL_API_TOKEN="$(clean_env_value "$INTERNAL_API_TOKEN")"
+          INVENTORY_SERVICE_BASE_URL="$(clean_env_value "$INVENTORY_SERVICE_BASE_URL")"
+          WALLET_SERVICE_BASE_URL="$(clean_env_value "$WALLET_SERVICE_BASE_URL")"
+          VOUCHER_SERVICE_BASE_URL="$(clean_env_value "$VOUCHER_SERVICE_BASE_URL")"
+
           cloud_sql_valid=false
           if [ -n "${CLOUD_SQL_INSTANCE_CONNECTION_NAME:-}" ] &&
             [[ "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z0-9-]+:[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]]; then
@@ -80,6 +94,11 @@ jobs:
           if [[ "$db_url" == *"jdbc:h2:"* ]]; then
             db_driver="org.h2.Driver"
           fi
+
+          INTERNAL_API_TOKEN="${INTERNAL_API_TOKEN:-json-internal-token}"
+          INVENTORY_SERVICE_BASE_URL="${INVENTORY_SERVICE_BASE_URL:-https://inventory-api-osvihgaoya-uc.a.run.app}"
+          WALLET_SERVICE_BASE_URL="${WALLET_SERVICE_BASE_URL:-https://wallet-api-osvihgaoya-uc.a.run.app}"
+          VOUCHER_SERVICE_BASE_URL="${VOUCHER_SERVICE_BASE_URL:-https://voucher-promo-api-osvihgaoya-uc.a.run.app}"
 
           {
             printf 'APP_CORS_ALLOWED_ORIGINS=%s\n' "$APP_CORS_ALLOWED_ORIGINS"
