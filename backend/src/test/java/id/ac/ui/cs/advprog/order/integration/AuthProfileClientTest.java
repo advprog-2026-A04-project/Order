@@ -31,7 +31,7 @@ class AuthProfileClientTest {
     @Test
     void recordJastiperCompletedOrderShouldCallInternalEndpoint() throws Exception {
         server.enqueue(new MockResponse().setResponseCode(200));
-        AuthProfileClient client = new AuthProfileClient(server.url("/").toString(), "secret");
+        AuthProfileClient client = new AuthProfileClient(" \uFEFF" + server.url("/"), "\uFEFFsecret ");
 
         client.recordJastiperCompletedOrder(2001L);
 

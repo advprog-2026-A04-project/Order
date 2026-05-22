@@ -19,8 +19,8 @@ public class AuthProfileClient {
             @Value("${services.auth-profile.base-url}") String baseUrl,
             @Value("${app.internal-token}") String internalToken
     ) {
-        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
-        this.internalToken = internalToken;
+        this.restClient = RestClient.builder().baseUrl(IntegrationConfigValues.sanitize(baseUrl)).build();
+        this.internalToken = IntegrationConfigValues.sanitize(internalToken);
     }
 
     public void recordJastiperCompletedOrder(Long jastiperId) {
