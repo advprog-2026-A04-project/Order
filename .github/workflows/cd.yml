@@ -56,9 +56,9 @@ jobs:
         run: |
           trap 'rm -f deploy.env' EXIT
           db_url="${DB_URL:-}"
-          if [[ "$db_url" == \?jdbc:* ]]; then
-            db_url="${db_url#?}"
-          fi
+          while [[ "${db_url:0:1}" == "?" ]]; do
+            db_url="${db_url:1}"
+          done
 
           db_driver="$DB_DRIVER"
           if [[ "$db_url" == *"jdbc:h2:"* ]]; then
