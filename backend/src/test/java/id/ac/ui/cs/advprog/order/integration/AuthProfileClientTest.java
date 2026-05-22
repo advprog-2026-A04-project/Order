@@ -1,10 +1,9 @@
 package id.ac.ui.cs.advprog.order.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import id.ac.ui.cs.advprog.order.common.ApiException;
 import java.io.IOException;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -63,10 +62,11 @@ class AuthProfileClientTest {
     }
 
     @Test
-    void remoteFailureShouldRaiseApiException() {
+    void remoteFailureShouldNotBlockOrderLifecycle() {
         server.enqueue(new MockResponse().setResponseCode(503));
         AuthProfileClient client = new AuthProfileClient(server.url("/").toString(), "secret");
 
-        assertThrows(ApiException.class, () -> client.recordJastiperRating(2001L, 5));
+        assertDoesNotThrow(() -> client.recordJastiperRating(2001L, 5));
+        assertEquals(1, server.getRequestCount());
     }
 }
