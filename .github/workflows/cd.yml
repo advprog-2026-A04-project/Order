@@ -55,10 +55,26 @@ jobs:
           VOUCHER_SERVICE_BASE_URL: ${{ secrets.VOUCHER_SERVICE_BASE_URL }}
         run: |
           trap 'rm -f deploy.env' EXIT
-          db_url="${DB_URL:-}"
-          while [[ "${db_url:0:1}" == "?" ]]; do
-            db_url="${db_url:1}"
-          done
+          default_db_url="jdbc:h2:mem:order;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+
+          cloud_sql_valid=false
+          if [ -n "${CLOUD_SQL_INSTANCE_CONNECTION_NAME:-}" ] &&
+            [[ "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z0-9-]+:[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]]; then
+            cloud_sql_valid=true
+          fi
+
+          db_url="${DB_URL:-$default_db_url}"
+          if [[ "$db_url" == *"jdbc:"* && "$db_url" != jdbc:* ]]; then
+            db_url="jdbc:${db_url#*jdbc:}"
+          fi
+          if [[ "$db_url" != jdbc:* ]]; then
+            echo "::warning::DB_URL is not a JDBC URL; using demo H2 datasource."
+            db_url="$default_db_url"
+          fi
+          if [[ "$db_url" == jdbc:postgresql:* && "$cloud_sql_valid" != "true" ]]; then
+            echo "::warning::PostgreSQL DB_URL has no valid Cloud SQL attachment; using demo H2 datasource."
+            db_url="$default_db_url"
+          fi
 
           db_driver="$DB_DRIVER"
           if [[ "$db_url" == *"jdbc:h2:"* ]]; then
@@ -80,12 +96,10 @@ jobs:
           } > deploy.env
 
           cloud_sql_args=()
-          if [ -n "${CLOUD_SQL_INSTANCE_CONNECTION_NAME:-}" ]; then
-            if [[ "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z0-9-]+:[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]]; then
-              cloud_sql_args+=(--add-cloudsql-instances "$CLOUD_SQL_INSTANCE_CONNECTION_NAME")
-            else
-              echo "::warning::Skipping invalid CLOUD_SQL_INSTANCE_CONNECTION_NAME value."
-            fi
+          if [ "$cloud_sql_valid" = "true" ]; then
+            cloud_sql_args+=(--add-cloudsql-instances "$CLOUD_SQL_INSTANCE_CONNECTION_NAME")
+          elif [ -n "${CLOUD_SQL_INSTANCE_CONNECTION_NAME:-}" ]; then
+            echo "::warning::Skipping invalid CLOUD_SQL_INSTANCE_CONNECTION_NAME value."
           fi
 
           project_id="${GOOGLE_CLOUD_PROJECT:-${CLOUDSDK_CORE_PROJECT}}"
