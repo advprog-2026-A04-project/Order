@@ -44,3 +44,4 @@ backend/data/
 *.mv.db
 *.trace.db
 
+.claude

@@ -5,9 +5,11 @@ import id.ac.ui.cs.advprog.order.common.ErrorCode;
 import id.ac.ui.cs.advprog.order.dto.CheckoutRequest;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
+import id.ac.ui.cs.advprog.order.repository.IdempotencyRecordRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderItemRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderRepository;
 import id.ac.ui.cs.advprog.order.repository.RatingRepository;
+import id.ac.ui.cs.advprog.order.service.OrderAuditService;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -22,15 +24,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class OrderServiceSelfPurchaseTest {
-    private OrderService buildService(CheckoutPreparationService prep) {
+    private OrderService buildService(CheckoutPreparationService prep, WalletClient wallet) {
         return new OrderService(
                 mock(OrderRepository.class),
                 mock(OrderItemRepository.class),
                 mock(RatingRepository.class),
+                mock(IdempotencyRecordRepository.class),
                 mock(InventoryClient.class),
-                mock(WalletClient.class),
+                wallet,
                 prep,
-                mock(CheckoutCompensationService.class)
+                mock(CheckoutCompensationService.class),
+                mock(OrderAuditService.class)
         );
     }
 
@@ -55,10 +59,12 @@ class OrderServiceSelfPurchaseTest {
                 orderRepository,
                 mock(OrderItemRepository.class),
                 mock(RatingRepository.class),
+                mock(IdempotencyRecordRepository.class),
                 mock(InventoryClient.class),
                 walletClient,
                 prep,
-                mock(CheckoutCompensationService.class)
+                mock(CheckoutCompensationService.class),
+                mock(OrderAuditService.class)
         );
 
         CheckoutRequest request = new CheckoutRequest();
@@ -75,7 +81,7 @@ class OrderServiceSelfPurchaseTest {
     @Test
     void checkoutShouldRejectWhenBuyerIsSolePrimaryJastiper() {
         CheckoutPreparationService prep = mock(CheckoutPreparationService.class);
-        OrderService service = buildService(prep);
+        OrderService service = buildService(prep, mock(WalletClient.class));
 
         CheckoutRequest request = new CheckoutRequest();
         when(prep.prepare(request)).thenReturn(preparedWith(5L));
@@ -92,10 +98,12 @@ class OrderServiceSelfPurchaseTest {
                 mock(OrderRepository.class),
                 mock(OrderItemRepository.class),
                 mock(RatingRepository.class),
+                mock(IdempotencyRecordRepository.class),
                 mock(InventoryClient.class),
                 wallet,
                 prep,
-                mock(CheckoutCompensationService.class)
+                mock(CheckoutCompensationService.class),
+                mock(OrderAuditService.class)
         );
 
         CheckoutRequest request = new CheckoutRequest();
@@ -110,7 +118,7 @@ class OrderServiceSelfPurchaseTest {
     void checkoutShouldAllowWhenNoJastiperAssigned() {
         CheckoutPreparationService prep = mock(CheckoutPreparationService.class);
         WalletClient wallet = mock(WalletClient.class);
-        OrderService service = buildService(prep);
+        OrderService service = buildService(prep, wallet);
 
         CheckoutRequest request = new CheckoutRequest();
         when(prep.prepare(request)).thenReturn(preparedWith(null));

@@ -7,9 +7,11 @@ import id.ac.ui.cs.advprog.order.entity.OrderItem;
 import id.ac.ui.cs.advprog.order.entity.OrderStatus;
 import id.ac.ui.cs.advprog.order.integration.InventoryClient;
 import id.ac.ui.cs.advprog.order.integration.WalletClient;
+import id.ac.ui.cs.advprog.order.repository.IdempotencyRecordRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderItemRepository;
 import id.ac.ui.cs.advprog.order.repository.OrderRepository;
 import id.ac.ui.cs.advprog.order.repository.RatingRepository;
+import id.ac.ui.cs.advprog.order.service.OrderAuditService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -27,9 +29,10 @@ class OrderServiceCancelTest {
     private OrderService buildService(OrderRepository repo, OrderItemRepository itemRepo,
                                        WalletClient wallet, InventoryClient inventory) {
         return new OrderService(repo, itemRepo, mock(RatingRepository.class),
-                inventory, wallet,
+                mock(IdempotencyRecordRepository.class), inventory, wallet,
                 mock(CheckoutPreparationService.class),
-                mock(CheckoutCompensationService.class));
+                mock(CheckoutCompensationService.class),
+                mock(OrderAuditService.class));
     }
 
     @Test
