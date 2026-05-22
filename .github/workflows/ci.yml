@@ -23,17 +23,21 @@ jobs:
       - name: Grant execute permission
         run: chmod +x ./gradlew
 
-      - name: Build & Test
-        run: ./gradlew test
-
-      - name: JaCoCo report
-        run: ./gradlew jacocoTestReport
+      - name: Build, test, coverage gate, and package
+        env:
+          SPRING_PROFILES_ACTIVE: test
+        run: ./gradlew check bootJar --no-daemon
 
       - name: Upload JaCoCo HTML
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: jacoco-report
-          path: backend/build/reports/jacoco/test/html
+          if-no-files-found: warn
+          path: |
+            backend/build/test-results/test/**
+            backend/build/reports/tests/test/**
+            backend/build/reports/jacoco/test/**
 
   frontend:
     name: Frontend (lint + build)
